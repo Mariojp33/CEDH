@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { fetchTournaments } = require('./lib/topdeck');
 const { buildRecords, filterRecords, commanderList, commanderReport, myListReport, trendReport, synergyReport, variantsReport, matchups, matrix, cardsVsOpponent } = require('./lib/stats');
+const cache = require('./lib/cache');
 const { parseText } = require('./lib/parse');
 const { mockTournaments } = require('./lib/mock');
 
@@ -27,17 +28,14 @@ if (!MOCK && !API_KEY) {
 // Estado en memoria. Los registros se guardan con `cards` como array para poder serializarlos.
 let state = { records: [], updatedAt: null, refreshing: false, error: null, coveredDays: 0 };
 
-function toStored(records) { return records.map(r => ({ ...r, cards: [...r.cards] })); }
-function fromStored(records) { return records.map(r => ({ ...r, cards: new Set(r.cards) })); }
-
-// Sube la versión cuando cambie la forma de los registros (v3: añade `seats` por mesa y `size` del torneo).
-const CACHE_VERSION = 3;
+// La caché se guarda en formato compacto (lib/cache.js, v4). Se siguen leyendo las v3 anteriores.
 
 function loadCache() {
   try {
     const j = JSON.parse(fs.readFileSync(CACHE_FILE, 'utf8'));
-    if (j.version !== CACHE_VERSION) { console.log('Caché de otra versión: se descarga de nuevo'); return; }
-    state.records = fromStored(j.records);
+    const records = cache.decodeAny(j);
+    if (!records) { console.log('Caché de otra versión: se descarga de nuevo'); return; }
+    state.records = records;
     state.updatedAt = j.updatedAt;
     state.coveredDays = j.days || 90; // las cachés anteriores solo guardaban 90 días
     console.log(`Caché cargada: ${state.records.length} mazos (${j.updatedAt})`);
@@ -46,9 +44,12 @@ function loadCache() {
 
 function saveCache() {
   fs.mkdirSync(DATA_DIR, { recursive: true });
-  fs.writeFileSync(CACHE_FILE, JSON.stringify({
-    version: CACHE_VERSION, updatedAt: state.updatedAt, days: state.coveredDays, records: toStored(state.records),
+  // Se escribe a un archivo temporal y se renombra: un corte a mitad no deja la caché a medias.
+  const tmp = CACHE_FILE + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify({
+    version: cache.VERSION, updatedAt: state.updatedAt, days: state.coveredDays, ...cache.encode(state.records),
   }));
+  fs.renameSync(tmp, CACHE_FILE);
 }
 
 async function refresh() {
@@ -65,7 +66,7 @@ async function refresh() {
         apiKey: API_KEY, days, participantMin: PARTICIPANT_MIN,
         onProgress: p => console.log(`Descargando ${p.done}/${p.total} ventanas, ${p.tournaments} torneos`),
       });
-    const fresh = buildRecords(tournaments);
+    const fresh = cache.interned(buildRecords(tournaments));
     const freshTids = new Set(fresh.map(r => r.tid));
     const cutoff = Math.floor(Date.now() / 1000) - DAYS * 86400;
     state.records = state.records

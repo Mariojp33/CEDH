@@ -198,3 +198,22 @@ test('commanderReport incluye la tasa de empates', () => {
   const r = commanderReport(buildRecords(mockTournaments()), KINNAN);
   assert.ok(r.drawRate >= 0 && r.drawRate < 1 && Number.isInteger(r.draws));
 });
+
+test('cache: codificar y decodificar conserva los registros y comparte las cadenas', () => {
+  const cache = require('../lib/cache');
+  const recs = buildRecords(mockTournaments()).slice(0, 300);
+  const back = cache.decodeAny(JSON.parse(JSON.stringify({ version: cache.VERSION, ...cache.encode(recs) })));
+  assert.strictEqual(back.length, recs.length);
+  for (let i = 0; i < recs.length; i++) {
+    assert.deepStrictEqual([...back[i].cards].sort(), [...recs[i].cards].sort());
+    assert.deepStrictEqual(back[i].seats, recs[i].seats);
+    assert.deepStrictEqual({ ...back[i], cards: 0, seats: 0 }, { ...recs[i], cards: 0, seats: 0 });
+  }
+  // Estadísticas idénticas antes y después
+  assert.deepStrictEqual(commanderList(back, 5), commanderList(recs, 5));
+  // El orden de recorrido de las cartas cambia en el último decimal: se compara con tolerancia
+  const top = rep => commanderReport(rep, KINNAN).best.slice(0, 5).map(c => [c.card, c.decks, Math.round(c.adj * 1e9)]);
+  assert.deepStrictEqual(top(back), top(recs));
+  assert.ok(back[0].cards.has([...recs[0].cards][0]) && !back[0].cards.has('No existe'));
+  assert.strictEqual(back[0].cards.size, recs[0].cards.size);
+});

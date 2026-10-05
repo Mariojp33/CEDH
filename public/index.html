@@ -24,12 +24,12 @@
   .status { font-size: 13px; margin-bottom: 20px; }
   .banner { background: var(--bad-bg); border: 1px solid var(--bad); color: var(--ink); padding: 8px 12px; border-radius: 8px; margin-bottom: 16px; font-size: 13px; }
   .banner.demo { background: var(--panel); border-color: var(--accent); }
-  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 16px; overflow-x: auto; }
   input[type=search], select { width: 100%; padding: 9px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--ink); font: inherit; }
   table { width: 100%; border-collapse: collapse; }
   th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; }
   th { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
-  td.n, th.n { text-align: right; }
+  td.n, th.n { text-align: right; white-space: nowrap; }
   tr.click { cursor: pointer; }
   tr.click:hover td { background: var(--bg); }
   .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px; }
@@ -66,12 +66,12 @@
   .track i.neg { right: 50%; background: var(--bad); }
   .share { display: flex; align-items: center; gap: 8px; min-width: 90px; justify-content: flex-end; }
   .share span { display: block; height: 8px; border-radius: 4px; background: var(--accent); opacity: .55; }
-  .gauge { position: relative; height: 14px; background: var(--line); border-radius: 7px; margin: 26px 0 22px; }
+  .gauge { position: relative; height: 14px; background: var(--line); border-radius: 7px; margin: 48px 0 24px; }
   .gauge .ci { position: absolute; top: 0; bottom: 0; background: var(--accent); opacity: .35; border-radius: 7px; }
   .gauge .pt { position: absolute; top: -4px; bottom: -4px; width: 4px; margin-left: -2px; background: var(--accent); border-radius: 2px; }
   .gauge .mk { position: absolute; top: -6px; bottom: -6px; width: 2px; background: var(--ink); opacity: .6; }
   .gauge .lb { position: absolute; font-size: 11.5px; color: var(--muted); transform: translateX(-50%); white-space: nowrap; }
-  .gauge .lb.t { top: -22px; } .gauge .lb.b { top: 20px; }
+  .gauge .lb.t { top: -22px; } .gauge .lb.t2 { top: -42px; } .gauge .lb.b { top: 20px; }
   .rel { font-size: 11.5px; white-space: nowrap; }
   .rel.hi { color: var(--good); } .rel.mid { color: var(--accent); } .rel.lo { color: var(--muted); }
   textarea.list { width: 100%; min-height: 120px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--ink); font: 13px/1.4 ui-monospace, monospace; resize: vertical; }
@@ -80,6 +80,18 @@
   svg.scatter text { fill: var(--muted); font-size: 11px; }
   svg.scatter text.q { font-size: 12px; font-weight: 600; opacity: .8; }
   svg.scatter text.pl { fill: var(--ink); font-size: 10.5px; }
+  .variants { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+  .variant { border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+  .variant h3 { margin: 0 0 6px; font-size: 14px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+  .chip { font-size: 12px; padding: 2px 8px; border-radius: 99px; background: var(--bg); border: 1px solid var(--line); }
+  .chip small { color: var(--muted); }
+  svg.trend { width: 100%; height: auto; display: block; }
+  svg.trend text { fill: var(--muted); font-size: 11px; }
+  button.ghost { padding: 4px 10px; border: 1px solid var(--line); border-radius: 99px; background: var(--bg); color: var(--ink); font: inherit; font-size: 12px; cursor: pointer; }
+  button.ghost:hover { border-color: var(--accent); }
+  .row { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+  .row h2 { margin: 0; }
   footer { margin-top: 32px; font-size: 13px; color: var(--muted); }
   footer a { color: var(--accent); }
   .tag { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 99px; background: var(--bg); border: 1px solid var(--line); color: var(--muted); }
@@ -118,17 +130,43 @@ const F = { min: '', max: '', days: 90 };
 // Barra centrada en el 25 % neutro: verde a la derecha (mejor), roja a la izquierda (peor); escala ±`range`.
 const track = (d, range) => `<div class="track"><i class="${d >= 0 ? 'pos' : 'neg'}" style="width:${Math.min(50, Math.abs(d) / range * 50)}%"></i></div>`;
 let view = { t: 'list' };
-const api = async p => {
+const api = async (p, o = {}) => {
   const u = new URL(p, location.origin);
   if (F.min) u.searchParams.set('minPlayers', F.min);
   if (F.max) u.searchParams.set('maxPlayers', F.max);
-  if (F.days) u.searchParams.set('days', F.days);
+  const days = o.days ?? F.days;
+  if (days) u.searchParams.set('days', days);
   const r = await fetch(u);
   if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.status);
   return r.json();
 };
 
 let commanders = [];
+
+// Estado compartible en la dirección (#d=90&min=30&c=Comandante): se lee al abrir y se escribe al navegar.
+function writeHash() {
+  const h = new URLSearchParams();
+  h.set('d', F.days);
+  if (F.min) h.set('min', F.min);
+  if (F.max) h.set('max', F.max);
+  if (view.t === 'cmd') h.set('c', view.name);
+  if (view.t === 'cmp') { h.set('c', view.a); h.set('vs', view.b); }
+  try { history.replaceState(null, '', '#' + h); } catch { /* sin historial (vista previa) */ }
+}
+function readHash() {
+  const h = new URLSearchParams(location.hash.slice(1));
+  const d = Number(h.get('d'));
+  if ([30, 90, 180].includes(d)) F.days = d;
+  F.min = h.get('min') || ''; F.max = h.get('max') || '';
+  $('#fmin').value = F.min; $('#fmax').value = F.max;
+  if (h.get('c') && h.get('vs')) view = { t: 'cmp', a: h.get('c'), b: h.get('vs') };
+  else if (h.get('c')) view = { t: 'cmd', name: h.get('c'), minWith: 5 };
+}
+const store = {
+  get: k => { try { return localStorage.getItem(k) || ''; } catch { return ''; } },
+  set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* almacenamiento bloqueado */ } },
+};
+async function ensureCommanders() { if (!commanders.length) commanders = await api('/api/commanders?min=5'); }
 
 // Fiabilidad según q (proporción esperada de falsos positivos tras corregir por comparaciones múltiples).
 const rel = q => q == null ? '' : q < 0.05 ? '<span class="rel hi" title="q &lt; 5 %: es poco probable que sea casualidad">● alta</span>'
@@ -151,7 +189,15 @@ function scatter(cards) {
   const dots = pts.map(c => `<circle cx="${X(c.inclusion).toFixed(1)}" cy="${Y(c.adj).toFixed(1)}" r="${rad(c).toFixed(1)}"
       fill="var(${c.adj >= 0 ? '--good' : '--bad'})" fill-opacity="${c.q < 0.25 ? 0.85 : 0.3}" stroke="var(--panel)" stroke-width="1">
       <title>${esc(c.card)}\nEn ${c.decks} mazos (${pct(c.inclusion, 0)})\nDiferencia ajustada ${pp(c.adj)} (bruta ${pp(c.lift)})</title></circle>`).join('');
-  const labels = [...labelled].map(c => `<text class="pl" x="${(X(c.inclusion) + rad(c) + 3).toFixed(1)}" y="${(Y(c.adj) + 3).toFixed(1)}">${esc(short(c.card, 22))}</text>`).join('');
+  const placed = [];
+  const labels = [...labelled].map(c => {
+    const t = short(c.card, 22), w = t.length * 5.6, cx = X(c.inclusion), cy = Y(c.adj) + 3;
+    const left = cx + rad(c) + 3 + w > W - R;
+    const x0 = left ? cx - rad(c) - 3 - w : cx + rad(c) + 3;
+    if (placed.some(b => Math.abs(b.y - cy) < 12 && x0 < b.x + b.w && b.x < x0 + w)) return ''; // se solaparía con otra etiqueta
+    placed.push({ x: x0, y: cy, w });
+    return `<text class="pl" x="${(left ? cx - rad(c) - 3 : x0).toFixed(1)}" y="${cy.toFixed(1)}" ${left ? 'text-anchor="end"' : ''}>${esc(t)}</text>`;
+  }).join('');
   return `<svg class="scatter" viewBox="0 0 ${W} ${H}" role="img" aria-label="Inclusión frente a diferencia de winrate por carta">
     ${yTicks.map(v => `<line x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--line)" ${v === 0 ? 'stroke-width="2"' : ''}/><text x="${L - 6}" y="${Y(v) + 4}" text-anchor="end">${v > 0 ? '+' : ''}${(v * 100).toFixed(0)}</text>`).join('')}
     ${xTicks.map(v => `<text x="${X(v)}" y="${H - 14}" text-anchor="middle">${(v * 100).toFixed(0)} %</text>`).join('')}
@@ -167,8 +213,11 @@ function scatter(cards) {
 
 // Panel «Mi lista»: la lista pegada se compara con lo que juega el meta con este comandante.
 function bindMyList(name) {
+  const saved = store.get('list:' + name);
+  if (saved) { $('#ml-text').value = saved; $('#ml-text').placeholder = ''; }
   $('#ml-go').onclick = async () => {
     const out = $('#ml-out'), list = $('#ml-text').value;
+    store.set('list:' + name, list); // se recuerda en este navegador para no pegarla cada vez
     if (!list.trim()) { out.innerHTML = '<span class="muted">Pega primero una lista.</span>'; return; }
     out.innerHTML = '<span class="muted">Analizando…</span>';
     try {
@@ -189,9 +238,10 @@ function bindMyList(name) {
           ${r.unknown.length ? `<br>No aparecen en ningún mazo de este comandante (¿nombre mal escrito o carta nueva?): ${esc(r.unknown.slice(0, 12).join(', '))}${r.unknown.length > 12 ? '…' : ''}` : ''}</div>
         <div class="cols">
           <div><h2>Cartas a revisar de tu lista</h2>${tbl(r.review, 'Nada llamativo: ninguna carta tuya es rara ni baja el winrate.')}</div>
-          <div><h2>Cartas muy jugadas que no llevas</h2>${tbl(r.missing, 'Llevas todo lo que juega la mayoría.')}</div>
+          <div><div class="row"><h2>Cartas muy jugadas que no llevas</h2>${r.missing.length ? '<button class="ghost" data-copy="missing">Copiar lista</button>' : ''}</div>${tbl(r.missing, 'Llevas todo lo que juega la mayoría.')}</div>
         </div>
-        <h2 style="margin-top:16px">Opciones con buen rendimiento que no llevas</h2>${tbl(r.tech, 'Ninguna carta destaca con suficiente fiabilidad.')}`;
+        <div class="row" style="margin-top:16px"><h2>Opciones con buen rendimiento que no llevas</h2>${r.tech.length ? '<button class="ghost" data-copy="tech">Copiar lista</button>' : ''}</div>${tbl(r.tech, 'Ninguna carta destaca con suficiente fiabilidad.')}`;
+      out.querySelectorAll('[data-copy]').forEach(b => b.onclick = () => copyText(r[b.dataset.copy].map(c => '1 ' + c.card).join('\n'), b));
     } catch (e) { out.innerHTML = `<span class="muted">${esc(e.message)}</span>`; }
   };
 }
@@ -215,6 +265,10 @@ async function show() {
   if (view.t === 'cmd') {
     try { return await openCommander(view.name, view.minWith); }
     catch { view = { t: 'list' }; } // el comandante no tiene datos con este filtro
+  }
+  if (view.t === 'cmp') {
+    try { return await openCompare(view.a, view.b); }
+    catch { view = { t: 'list' }; }
   }
   commanders = await api('/api/commanders?min=5');
   renderList();
@@ -244,7 +298,7 @@ function renderList() {
     <div class="panel">
       <input type="search" id="q" placeholder="Buscar comandante…" autofocus>
       <table style="margin-top:12px"><thead><tr>
-        <th>Comandante</th><th class="n">Mazos</th><th class="n">Presencia en el meta</th><th>Winrate (la línea es el 25 % neutro)</th><th class="n">vs 25 %</th>
+        <th>Comandante</th><th class="n">Mazos</th><th class="n">Presencia en el meta</th><th>Winrate (la línea es el 25 % neutro)</th><th class="n">vs 25 %</th><th class="n" title="Partidas empatadas sobre el total">Empates</th>
       </tr></thead><tbody id="rows"></tbody></table>
       <div class="note">El winrate neutro en mesas de 4 es 25 %. Se cuentan victorias entre todas las partidas (suizas y eliminatorias); los empates cuentan como partida no ganada.</div>
     </div>
@@ -253,7 +307,7 @@ function renderList() {
       <div id="matrix" class="muted">Calculando…</div>
       <div class="note">Cada celda es el winrate del comandante de la fila en mesas donde está el de la columna. Verde = por encima de su media, rojo = por debajo (color completo a ±8 puntos). «—»: menos de 30 mesas.</div>
     </div>`;
-  view = { t: 'list' };
+  view = { t: 'list' }; writeHash();
   const maxShare = Math.max(0.001, ...commanders.map(c => c.metaShare));
   const draw = () => {
     const q = $('#q').value.toLowerCase();
@@ -263,6 +317,7 @@ function renderList() {
         <td><div class="share">${pct(c.metaShare)}<span style="width:${Math.min(100, c.metaShare / maxShare * 60)}px"></span></div></td>
         <td><div class="wr"><b>${pct(c.winRate)}</b>${track(c.winRate - .25, .10)}</div></td>
         <td class="n ${c.winRate >= .25 ? 'pos-t' : 'neg-t'}">${pp(c.winRate - .25)}</td>
+        <td class="n muted">${pct(c.drawRate)}</td>
       </tr>`).join('');
   };
   $('#q').oninput = draw; draw();
@@ -271,7 +326,7 @@ function renderList() {
 }
 
 async function openCommander(name, minWith = 5) {
-  view = { t: 'cmd', name, minWith };
+  view = { t: 'cmd', name, minWith }; writeHash();
   $('#app').innerHTML = '<div class="muted">Calculando…</div>';
   const r = await api(`/api/commander?name=${encodeURIComponent(name)}&minWith=${minWith}`);
   const maxLift = Math.max(0.01, ...[...r.best, ...r.worst].map(c => Math.abs(c.adj)));
@@ -283,12 +338,11 @@ async function openCommander(name, minWith = 5) {
   const liftRows = list => list.slice(0, 25).map(c => `
     <tr><td>${esc(c.card)}</td>
       <td class="n">${pct(c.inclusion, 0)}</td>
-      <td class="n">${pct(c.winRateWith)}</td>
       <td class="n muted">${pp(c.lift)}</td>
       <td class="n ${c.adj >= 0 ? 'pos-t' : 'neg-t'}">${pp(c.adj)}</td>
       <td style="width:90px"><div class="bar"><i class="${c.adj >= 0 ? 'pos' : 'neg'}" style="width:${Math.abs(c.adj) / maxLift * 50}%"></i></div></td>
       <td>${rel(c.q)}</td></tr>`).join('');
-  const head = '<thead><tr><th>Carta</th><th class="n">En mazos</th><th class="n">Winrate con ella</th><th class="n">Dif. bruta</th><th class="n" title="Diferencia encogida hacia 0 según el tamaño de la muestra">Ajustada</th><th></th><th>Fiabilidad</th></tr></thead>';
+  const head = '<thead><tr><th>Carta</th><th class="n">En mazos</th><th class="n">Dif. bruta</th><th class="n" title="Diferencia encogida hacia 0 según el tamaño de la muestra">Ajustada</th><th></th><th>Fiabilidad</th></tr></thead>';
 
   $('#app').innerHTML = `
     <button class="back" id="back">← Todos los comandantes</button>
@@ -298,6 +352,7 @@ async function openCommander(name, minWith = 5) {
       <div class="tile"><div class="v">${pct(r.winRate)}</div><div class="l">winrate (IC 95 %: ${pct(lo)}–${pct(hi)})</div></div>
       <div class="tile"><div class="v ${r.winRate >= r.baseline ? 'pos-t' : 'neg-t'}">${pp(r.winRate - r.baseline)}</div><div class="l">frente al 25 % neutro</div></div>
       <div class="tile"><div class="v">${r.games}</div><div class="l">partidas jugadas</div></div>
+      <div class="tile"><div class="v">${pct(r.drawRate)}</div><div class="l">de las partidas acaban en empate</div></div>
     </div>
     <div class="panel">
       <h2>¿Gana más que el azar?</h2>
@@ -305,7 +360,7 @@ async function openCommander(name, minWith = 5) {
         <div class="ci" style="left:${gx(lo)}%;width:${gx(hi) - gx(lo)}%"></div>
         <div class="mk" style="left:${gx(r.baseline)}%"></div>
         <div class="pt" style="left:${gx(r.winRate)}%"></div>
-        <span class="lb t" style="left:${gx(r.baseline)}%">25 % neutro</span>
+        <span class="lb t2" style="left:${gx(r.baseline)}%">25 % neutro</span>
         <span class="lb t" style="left:${gx(r.winRate)}%;color:var(--accent);font-weight:600">${pct(r.winRate)}</span>
         <span class="lb b" style="left:${gx(lo)}%">${pct(lo)}</span><span class="lb b" style="left:${gx(hi)}%">${pct(hi)}</span>
       </div>
@@ -314,6 +369,8 @@ async function openCommander(name, minWith = 5) {
         : '<b>No se distingue del azar</b>: el intervalo (zona sombreada) incluye el 25 %; hacen falta más partidas para decidir.'}</div>
     </div>
     <div class="ctl">
+      <label>Comparar con: <select id="cmp"><option value="">— elige comandante —</option></select></label>
+      <button class="ghost" id="share" title="Copia la dirección con el periodo, los filtros y este comandante">Copiar enlace</button>
       <label>Mínimo de mazos con la carta (y sin ella):
         <select id="min">${[3, 5, 10, 20].map(n => `<option ${n === minWith ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
     </div>
@@ -325,6 +382,19 @@ async function openCommander(name, minWith = 5) {
       <h2>Mapa de cartas: popularidad frente a rendimiento</h2>
       ${scatter(r.popular)}
       <div class="note">Cada punto es una carta; pasa el ratón para ver el detalle. Los puntos tenues son los de menos fiabilidad. Tamaño = nº de mazos que la juegan.</div>
+    </div>
+    <div class="panel">
+      <h2>Evolución en el tiempo</h2>
+      <div id="trend" class="muted">Calculando…</div>
+    </div>
+    <div class="panel">
+      <div class="row"><h2>Variantes de este comandante</h2>
+        <label class="muted">Grupos: <select id="vk" style="width:auto">${[2, 3, 4, 5].map(n => `<option ${n === 3 ? 'selected' : ''}>${n}</option>`).join('')}</select></label></div>
+      <div id="variants" class="muted">Calculando…</div>
+    </div>
+    <div class="panel">
+      <h2>Sinergias entre cartas</h2>
+      <div id="syn" class="muted">Calculando…</div>
     </div>
     <div class="panel">
       <h2>Mi lista</h2>
@@ -351,6 +421,13 @@ async function openCommander(name, minWith = 5) {
     </div>`;
   $('#back').onclick = renderList;
   bindMyList(name);
+  $('#share').onclick = () => copyText(location.href, $('#share'));
+  ensureCommanders().then(() => {
+    $('#cmp').insertAdjacentHTML('beforeend', commanders.filter(c => c.commander !== name).map(c => `<option>${esc(c.commander)}</option>`).join(''));
+  });
+  $('#cmp').onchange = e => e.target.value && openCompare(name, e.target.value);
+  $('#vk').onchange = e => loadVariants(name, Number(e.target.value));
+  loadTrend(name); loadVariants(name, 3); loadSynergy(name);
   $('#min').onchange = e => openCommander(name, Number(e.target.value));
   const drawCards = () => {
     const q = $('#cq').value.toLowerCase();
@@ -362,6 +439,135 @@ async function openCommander(name, minWith = 5) {
   $('#cq').oninput = drawCards; drawCards();
   window.scrollTo(0, 0);
   loadMatchups(name);
+}
+
+async function copyText(text, btn) {
+  const done = () => { if (btn) { const t = btn.textContent; btn.textContent = '¡Copiado!'; setTimeout(() => btn.textContent = t, 1500); } };
+  try { await navigator.clipboard.writeText(text); return done(); } catch { /* sin permiso: alternativa */ }
+  const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select();
+  try { document.execCommand('copy'); done(); } catch { /* nada más que hacer */ }
+  ta.remove();
+}
+
+// Evolución: winrate (con su intervalo) y presencia en el meta por periodos de 30 días.
+async function loadTrend(name) {
+  const box = $('#trend');
+  try {
+    const t = await api(`/api/trend?name=${encodeURIComponent(name)}`, { days: 0 });
+    const S = t.series;
+    if (S.length < 2) { box.textContent = 'Hace falta más de un periodo de datos.'; return; }
+    const W = 720, H = 330, L = 44, R = 12, n = S.length;
+    const X = i => L + i / (n - 1) * (W - L - R);
+    const wr = S.filter(b => b.winRate != null);
+    const lo = Math.min(.25, ...wr.map(b => b.ci[0])) - .02, hi = Math.max(.25, ...wr.map(b => b.ci[1])) + .02;
+    const Y = v => 14 + (1 - (v - lo) / (hi - lo)) * 170;
+    const share = Math.max(0.01, ...S.map(b => b.metaShare)), bar = v => v / share * 44;
+    const lab = b => new Date(b.end * 1000).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' });
+    const pts = S.map((b, i) => b.winRate == null ? null : [X(i), Y(b.winRate)]).filter(Boolean);
+    const line = pts.map((q, i) => (i ? 'L' : 'M') + q[0].toFixed(1) + ' ' + q[1].toFixed(1)).join(' ');
+    const withCi = S.map((b, i) => b.ci && [X(i), Y(b.ci[1]), Y(b.ci[0])]).filter(Boolean);
+    const band = withCi.length > 1
+      ? 'M' + withCi.map(q => q[0].toFixed(1) + ' ' + q[1].toFixed(1)).join(' L') + ' L' + [...withCi].reverse().map(q => q[0].toFixed(1) + ' ' + q[2].toFixed(1)).join(' L') + ' Z' : '';
+    const yt = []; for (let v = Math.ceil(lo * 20) / 20; v <= hi; v += .05) yt.push(v);
+    const row = (c, sign) => `<tr><td>${esc(c.card)}</td><td class="n muted">${pct(c.prior, 0)}</td><td class="n">${pct(c.recent, 0)}</td><td class="n ${sign}">${pp(c.diff)}</td></tr>`;
+    const tb = (rows, sign) => rows.length
+      ? `<table><thead><tr><th>Carta</th><th class="n">Antes</th><th class="n">Último periodo</th><th class="n">Cambio</th></tr></thead><tbody>${rows.map(c => row(c, sign)).join('')}</tbody></table>`
+      : '<div class="muted">Sin cambios claros.</div>';
+    box.innerHTML = `
+      <svg class="trend" viewBox="0 0 ${W} ${H}" role="img" aria-label="Evolución del winrate y de la presencia en el meta">
+        ${yt.map(v => `<line x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--line)" ${Math.abs(v - .25) < 1e-6 ? 'stroke-width="2" stroke-dasharray="5 4"' : ''}/><text x="${L - 6}" y="${Y(v) + 4}" text-anchor="end">${(v * 100).toFixed(0)} %</text>`).join('')}
+        ${band ? `<path d="${band}" fill="var(--accent)" fill-opacity=".18"/>` : ''}
+        <path d="${line}" fill="none" stroke="var(--accent)" stroke-width="2.5"/>
+        ${S.map((b, i) => b.winRate == null ? '' : `<circle cx="${X(i)}" cy="${Y(b.winRate)}" r="4" fill="var(--accent)"><title>Hasta ${lab(b)}: winrate ${pct(b.winRate)} (${b.decks} mazos, ${b.games} partidas)</title></circle>`).join('')}
+        <text x="${W - R}" y="10" text-anchor="end">Winrate (línea discontinua = 25 % neutro; zona = IC 95 %)</text>
+        ${S.map((b, i) => `<rect x="${X(i) - 12}" y="${284 - bar(b.metaShare)}" width="24" height="${bar(b.metaShare)}" rx="3" fill="var(--accent)" fill-opacity=".5"><title>Presencia en el meta: ${pct(b.metaShare)} (${b.decks} mazos)</title></rect>
+          <text x="${X(i)}" y="${280 - bar(b.metaShare)}" text-anchor="middle">${pct(b.metaShare, 1)}</text>
+          <text x="${X(i)}" y="304" text-anchor="middle">${lab(b)}</text>`).join('')}
+        <text x="${L}" y="212">Presencia en el meta (% de todos los mazos) ↓</text>
+        <text x="${(L + W - R) / 2}" y="322" text-anchor="middle">cada punto es un periodo de ${t.bucketDays} días, etiquetado con su fecha final</text>
+      </svg>
+      ${t.rising.length || t.falling.length ? `<div class="cols" style="margin-top:12px">
+        <div><h2>Cartas en ascenso</h2>${tb(t.rising, 'pos-t')}</div>
+        <div><h2>Cartas en descenso</h2>${tb(t.falling, 'neg-t')}</div></div>` : ''}
+      <div class="note">Los periodos recientes tienen menos partidas, por eso su zona sombreada es más ancha: no leas una subida pequeña como tendencia. Las cartas en ascenso comparan el último periodo (${t.recentDecks} mazos) con todo lo anterior (${t.priorDecks}). Esta vista ignora el selector de periodo y usa todo el histórico.</div>`;
+  } catch (e) { box.textContent = e.message; }
+}
+
+// Variantes: mazos agrupados automáticamente por las cartas que los diferencian.
+async function loadVariants(name, k) {
+  const box = $('#variants');
+  box.textContent = 'Calculando…';
+  try {
+    const v = await api(`/api/variants?name=${encodeURIComponent(name)}&k=${k}`);
+    if (v.tooFew || !v.variants.length) { box.textContent = 'Hacen falta al menos 40 mazos con este comandante (en el periodo y filtro actuales) para separar variantes.'; return; }
+    box.innerHTML = `<div class="variants">${v.variants.map((x, i) => `
+      <div class="variant">
+        <h3>Variante ${i + 1}: ${esc(short(x.signature.slice(0, 2).map(c => c.card).join(' + ') || 'sin rasgos claros', 44))}</h3>
+        <div class="muted">${x.decks} mazos (${pct(x.share, 0)} del total) · empates ${pct(x.drawRate)}</div>
+        <div class="wr" style="margin-top:8px"><b>${pct(x.winRate)}</b>${track(x.winRate - .25, .10)}</div>
+        <div class="muted" style="font-size:12px">IC 95 %: ${pct(x.ci[0])}–${pct(x.ci[1])} · ${pp(x.winRate - v.winRate)} frente a la media del comandante</div>
+        <div class="chips">${x.signature.map(c => `<span class="chip" title="Juegan la carta ${pct(c.inVariant, 0)} de esta variante frente a ${pct(c.inRest, 0)} del resto">${esc(short(c.card, 26))} <small>${pct(c.inVariant, 0)} vs ${pct(c.inRest, 0)}</small></span>`).join('')}</div>
+      </div>`).join('')}</div>
+      <div class="note">Los mazos se agrupan solos según qué cartas comparten (${v.features} cartas que no juega todo el mundo). Las etiquetas muestran las cartas más características de cada grupo, con el % de mazos del grupo que la juegan frente al resto. Cambia el número de grupos para afinar. Un grupo con menos winrate no es necesariamente peor construido: también puede reunir a jugadores con menos experiencia.</div>`;
+  } catch (e) { box.textContent = e.message; }
+}
+
+// Sinergias: pares de cartas que juntas rinden más (o menos) de lo que suman por separado.
+async function loadSynergy(name) {
+  const box = $('#syn');
+  try {
+    const r = await api(`/api/synergy?name=${encodeURIComponent(name)}`);
+    if (!r.tested) { box.textContent = 'Muestra insuficiente con el periodo y filtro actuales (cada combinación pide al menos 8 mazos en cada caso).'; return; }
+    const ok = list => list.filter(x => x.q < 0.25).slice(0, 10);
+    const pos = ok(r.positive), neg = ok(r.negative);
+    const mx = Math.max(0.02, ...[...pos, ...neg].map(x => Math.abs(x.synergy)));
+    const tb = rows => rows.length
+      ? `<table><thead><tr><th>Par de cartas</th><th class="n">Mazos con ambas</th><th class="n">Sinergia</th><th></th><th>Fiabilidad</th></tr></thead><tbody>${rows.map(x => `
+      <tr><td>${esc(short(x.a, 24))} <span class="muted">+</span> ${esc(short(x.b, 24))}</td><td class="n">${x.decks}</td>
+      <td class="n ${x.synergy >= 0 ? 'pos-t' : 'neg-t'}">${pp(x.synergy)}</td><td style="width:80px">${track(x.synergy, mx)}</td><td>${rel(x.q)}</td></tr>`).join('')}</tbody></table>`
+      : '<div class="muted">Ningún par destaca con fiabilidad suficiente.</div>';
+    box.innerHTML = `<div class="cols">
+      <div><h2>Se potencian juntas</h2>${tb(pos)}</div>
+      <div><h2>Se estorban o son redundantes</h2>${tb(neg)}</div></div>
+      <div class="note">Se probaron ${r.tested} pares. <b>Sinergia</b> = (winrate con ambas − solo con la primera) − (solo con la segunda − con ninguna): cuánto mejor (o peor) rinden juntas que la suma de lo que aportan por separado. Solo se muestran pares con fiabilidad media o alta. Cuidado: dos cartas del mismo plan de juego aparecen juntas siempre y pueden salir como «sinergia» sin potenciarse de verdad; consulta también las variantes.</div>`;
+  } catch (e) { box.textContent = e.message; }
+}
+
+// Comparar dos comandantes lado a lado.
+async function openCompare(a, b) {
+  view = { t: 'cmp', a, b }; writeHash();
+  $('#app').innerHTML = '<div class="muted">Calculando…</div>';
+  const [ra, rb, mu] = await Promise.all([
+    api(`/api/commander?name=${encodeURIComponent(a)}`), api(`/api/commander?name=${encodeURIComponent(b)}`),
+    api(`/api/matchups?name=${encodeURIComponent(a)}`).catch(() => ({ rows: [] }))]);
+  const h2h = mu.rows.find(x => x.opponent === b);
+  const col = r => {
+    const cards = (l, sign) => l.filter(c => c.q < 0.25).slice(0, 8)
+      .map(c => `<tr><td>${esc(c.card)}</td><td class="n">${pct(c.inclusion, 0)}</td><td class="n ${sign}">${pp(c.adj)}</td></tr>`).join('') || '<tr><td class="muted">Sin datos fiables</td></tr>';
+    return `<div class="panel">
+      <h2>${esc(r.commander)}</h2>
+      <div class="wr"><b>${pct(r.winRate)}</b>${track(r.winRate - .25, .10)}</div>
+      <div class="muted" style="margin:6px 0 10px">IC 95 %: ${pct(r.ci[0])}–${pct(r.ci[1])} · ${pp(r.winRate - r.baseline)} frente al 25 %</div>
+      <table><tbody><tr><td>Mazos</td><td class="n">${r.decks}</td></tr><tr><td>Torneos</td><td class="n">${r.tournaments}</td></tr>
+        <tr><td>Partidas</td><td class="n">${r.games}</td></tr><tr><td>Empates</td><td class="n">${pct(r.drawRate)}</td></tr></tbody></table>
+      <h2 style="margin-top:14px">Cartas que más ayudan</h2>
+      <table><thead><tr><th>Carta</th><th class="n">En mazos</th><th class="n">Ajustada</th></tr></thead><tbody>${cards(r.best, 'pos-t')}</tbody></table>
+      <h2 style="margin-top:14px">Cartas que más lastran</h2>
+      <table><thead><tr><th>Carta</th><th class="n">En mazos</th><th class="n">Ajustada</th></tr></thead><tbody>${cards(r.worst, 'neg-t')}</tbody></table>
+    </div>`;
+  };
+  $('#app').innerHTML = `
+    <button class="back" id="back">← Volver a ${esc(short(a, 40))}</button>
+    <h2 style="font-size:20px">Comparación</h2>
+    <div class="panel">
+      <h2>Cara a cara</h2>
+      ${h2h ? `<div><b>${esc(short(a, 40))}</b> gana el <b>${pct(h2h.winRate)}</b> de las veces cuando <b>${esc(short(b, 40))}</b> está en su mesa (${h2h.pods} mesas), frente al ${pct(h2h.winRateWithout)} sin él: <span class="${h2h.lift >= 0 ? 'pos-t' : 'neg-t'}">${pp(h2h.lift)}</span>.</div>
+      <div class="note">Mide solo mesas donde coinciden los dos. Recuerda el sesgo de composición de mesa (ver «Rendimiento contra el meta»).</div>`
+        : '<div class="muted">No hay mesas suficientes donde coincidan ambos con el periodo y filtro actuales.</div>'}
+    </div>
+    <div class="cols">${col(ra)}${col(rb)}</div>`;
+  $('#back').onclick = () => openCommander(a);
+  window.scrollTo(0, 0);
 }
 
 async function loadMatchups(name) {
@@ -433,6 +639,7 @@ async function loadMatrix() {
   } catch (e) { box.textContent = e.message; }
 }
 
+readHash();
 bindFilters();
 boot().catch(e => { $('#status').textContent = 'Error: ' + e.message; });
 </script>
