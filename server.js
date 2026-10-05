@@ -14,9 +14,14 @@ const MOCK = process.env.MOCK === '1';
 const API_KEY = '73d1500b-e4d1-4981-857d-74a6e8ec2541';
 const DAYS = Number(process.env.DAYS) || 180; // máximo que se puede elegir en la web (6 meses)
 const PARTICIPANT_MIN = Number(process.env.PARTICIPANT_MIN) || 16;
+// Ventana de descarga en días: más pequeña = menos memoria por petición (más peticiones, 100/min permitidas).
+const WINDOW_DAYS = Number(process.env.WINDOW_DAYS) || 3;
 const REFRESH_HOURS = Number(process.env.REFRESH_HOURS) || 6;
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const CACHE_FILE = path.join(DATA_DIR, 'records.json');
+// Copia de la caché incluida en el repositorio (npm run seed). Sirve de punto de partida cuando el disco
+// no persiste (p. ej. Render gratis): se carga al instante y solo se descargan los días que faltan.
+const SEED_FILE = path.join(__dirname, 'seed', 'records.json');
 const PUBLIC = path.join(__dirname, 'public');
 
 if (!MOCK && !API_KEY) {
@@ -31,24 +36,25 @@ let state = { records: [], updatedAt: null, refreshing: false, error: null, cove
 // La caché se guarda en formato compacto (lib/cache.js, v4). Se siguen leyendo las v3 anteriores.
 
 function loadCache() {
-  try {
-    const j = JSON.parse(fs.readFileSync(CACHE_FILE, 'utf8'));
-    const records = cache.decodeAny(j);
-    if (!records) { console.log('Caché de otra versión: se descarga de nuevo'); return; }
-    state.records = records;
-    state.updatedAt = j.updatedAt;
-    state.coveredDays = j.days || 90; // las cachés anteriores solo guardaban 90 días
-    console.log(`Caché cargada: ${state.records.length} mazos (${j.updatedAt})`);
-  } catch { /* primera ejecución */ }
+  for (const file of [CACHE_FILE, SEED_FILE]) {
+    try {
+      const j = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const records = cache.decodeAny(j);
+      if (!records) { console.log(`Caché ${path.basename(path.dirname(file))}/ de otra versión: se ignora`); continue; }
+      state.records = records;
+      state.updatedAt = j.updatedAt;
+      state.coveredDays = j.days || 90; // las cachés anteriores solo guardaban 90 días
+      console.log(`Caché cargada${file === SEED_FILE ? ' (copia del repositorio)' : ''}: ${state.records.length} mazos (${j.updatedAt})`);
+      return;
+    } catch { /* no existe o está dañada: se prueba la siguiente */ }
+  }
 }
 
 function saveCache() {
   fs.mkdirSync(DATA_DIR, { recursive: true });
   // Se escribe a un archivo temporal y se renombra: un corte a mitad no deja la caché a medias.
   const tmp = CACHE_FILE + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify({
-    version: cache.VERSION, updatedAt: state.updatedAt, days: state.coveredDays, ...cache.encode(state.records),
-  }));
+  cache.writeStream(fs, tmp, { updatedAt: state.updatedAt, days: state.coveredDays }, state.records);
   fs.renameSync(tmp, CACHE_FILE);
 }
 
@@ -58,15 +64,15 @@ async function refresh() {
   try {
     // Si la caché cubre menos días de los pedidos (p. ej. se subió DAYS), se descarga todo el periodo.
     const firstLoad = state.records.length === 0 || state.coveredDays < DAYS;
-    // Primera carga: todo el periodo. Después solo las últimas 2 semanas (el resto no cambia).
-    const days = firstLoad ? DAYS : Math.min(DAYS, 14);
+    // Primera carga: todo el periodo. Después solo los días transcurridos desde la última actualización.
+    const days = firstLoad ? DAYS : cache.refreshDays(state.updatedAt, DAYS);
     // Cada ventana descargada se convierte enseguida en registros compactos y se descarta el resto,
     // para que el pico de memoria sea el de una ventana y no el de todo el histórico.
     const fresh = [];
     if (MOCK) fresh.push(...cache.interned(buildRecords(mockTournaments())));
     else {
       await fetchTournaments({
-        apiKey: API_KEY, days, participantMin: PARTICIPANT_MIN,
+        apiKey: API_KEY, days, participantMin: PARTICIPANT_MIN, windowDays: WINDOW_DAYS,
         onBatch: batch => { fresh.push(...cache.interned(buildRecords(batch))); },
         onProgress: p => console.log(`Descargando ${p.done}/${p.total} ventanas, ${p.tournaments} torneos`),
       });

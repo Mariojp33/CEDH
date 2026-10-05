@@ -231,3 +231,29 @@ test('fetchTournaments con onBatch entrega cada ventana y no acumula', async () 
     assert.strictEqual((await fetchTournaments({ apiKey: 'k', days: 21, windowDays: 7 })).length, 3);
   } finally { global.fetch = real; }
 });
+
+test('cache: el guardado en streaming se lee igual que el codificado de golpe', () => {
+  const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
+  const cache = require('../lib/cache');
+  const recs = buildRecords(mockTournaments()).slice(0, 2500); // varios trozos
+  const f = path.join(os.tmpdir(), `cedh-cache-${process.pid}.json`);
+  try {
+    cache.writeStream(fs, f, { updatedAt: 'ayer', days: 180 }, recs, 700);
+    const j = JSON.parse(fs.readFileSync(f, 'utf8'));
+    assert.strictEqual(j.version, cache.VERSION); assert.strictEqual(j.days, 180); assert.strictEqual(j.updatedAt, 'ayer');
+    const back = cache.decodeAny(j);
+    assert.strictEqual(back.length, recs.length);
+    assert.deepStrictEqual(back.map(r => [r.key, r.tid, r.wins, r.cards.size, r.seats.length]),
+      recs.map(r => [r.key, r.tid, r.wins, r.cards.size, r.seats.length]));
+    assert.ok(back[10].cards.has([...recs[10].cards][0]));
+  } finally { fs.rmSync(f, { force: true }); }
+});
+
+test('refreshDays descarga solo los días que faltan, con mínimo y máximo', () => {
+  const { refreshDays } = require('../lib/cache');
+  const now = Date.parse('2026-10-10T12:00:00Z');
+  assert.strictEqual(refreshDays('2026-10-10T06:00:00Z', 180, { now }), 3);   // reciente: mínimo
+  assert.strictEqual(refreshDays('2026-10-05T12:00:00Z', 180, { now }), 7);   // 5 días + 2
+  assert.strictEqual(refreshDays('2026-01-01T00:00:00Z', 90, { now }), 90);   // muy antigua: tope
+  assert.strictEqual(refreshDays(null, 90, { now }), 90);
+});
