@@ -1,0 +1,13 @@
+{
+  "name": "topdeck-cedh-stats",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Estadísticas de cartas y winrate por comandante a partir de la API de TopDeck.gg",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node server.js",
+    "demo": "MOCK=1 node server.js",
+    "test": "node --test test/stats.test.js",
+    "check": "node scripts/check.js"
+  }
+}
