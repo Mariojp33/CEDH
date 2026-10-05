@@ -217,3 +217,17 @@ test('cache: codificar y decodificar conserva los registros y comparte las caden
   assert.ok(back[0].cards.has([...recs[0].cards][0]) && !back[0].cards.has('No existe'));
   assert.strictEqual(back[0].cards.size, recs[0].cards.size);
 });
+
+test('fetchTournaments con onBatch entrega cada ventana y no acumula', async () => {
+  const { fetchTournaments } = require('../lib/topdeck');
+  const real = global.fetch; let calls = 0;
+  global.fetch = async () => { calls++; return { ok: true, status: 200, json: async () => [{ TID: 'a' + calls }, { TID: 'a1' }] }; };
+  try {
+    const got = [];
+    const out = await fetchTournaments({ apiKey: 'k', days: 21, windowDays: 7, onBatch: b => got.push(b.map(t => t.TID)) });
+    assert.deepStrictEqual(out, []);
+    assert.deepStrictEqual(got, [['a1'], ['a2'], ['a3']]); // a1 repetido se descarta
+    calls = 0;
+    assert.strictEqual((await fetchTournaments({ apiKey: 'k', days: 21, windowDays: 7 })).length, 3);
+  } finally { global.fetch = real; }
+});

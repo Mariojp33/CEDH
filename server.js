@@ -60,13 +60,17 @@ async function refresh() {
     const firstLoad = state.records.length === 0 || state.coveredDays < DAYS;
     // Primera carga: todo el periodo. Después solo las últimas 2 semanas (el resto no cambia).
     const days = firstLoad ? DAYS : Math.min(DAYS, 14);
-    const tournaments = MOCK
-      ? mockTournaments()
-      : await fetchTournaments({
+    // Cada ventana descargada se convierte enseguida en registros compactos y se descarta el resto,
+    // para que el pico de memoria sea el de una ventana y no el de todo el histórico.
+    const fresh = [];
+    if (MOCK) fresh.push(...cache.interned(buildRecords(mockTournaments())));
+    else {
+      await fetchTournaments({
         apiKey: API_KEY, days, participantMin: PARTICIPANT_MIN,
+        onBatch: batch => { fresh.push(...cache.interned(buildRecords(batch))); },
         onProgress: p => console.log(`Descargando ${p.done}/${p.total} ventanas, ${p.tournaments} torneos`),
       });
-    const fresh = cache.interned(buildRecords(tournaments));
+    }
     const freshTids = new Set(fresh.map(r => r.tid));
     const cutoff = Math.floor(Date.now() / 1000) - DAYS * 86400;
     state.records = state.records
