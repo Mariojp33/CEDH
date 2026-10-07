@@ -1,0 +1,31 @@
+# Al subir cambios a main: ejecuta los tests y, si pasan, avisa a Render para que despliegue.
+# El aviso usa un "Deploy Hook" de Render (Settings → Deploy Hook) guardado como secreto del repositorio
+# con el nombre RENDER_DEPLOY_HOOK. Si el secreto no existe, solo se ejecutan los tests.
+# Si usas este flujo, pon Auto-Deploy en "Off" en Render para no desplegar dos veces.
+name: Tests y despliegue
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:   # también se puede lanzar a mano desde la pestaña Actions
+
+jobs:
+  test-y-despliegue:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Tests
+        run: npm test
+      - name: Avisar a Render
+        env:
+          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$HOOK" ]; then
+            echo "No hay secreto RENDER_DEPLOY_HOOK: no se avisa a Render."
+            exit 0
+          fi
+          curl --fail --silent --show-error -X POST "$HOOK"
+          echo "Render avisado: el despliegue empezará en unos segundos."
