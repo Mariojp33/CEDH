@@ -40,7 +40,8 @@ La primera carga descarga `DAYS` días (por defecto 180) en ventanas de 7 días,
 
 | Variable | Por defecto | Descripción |
 | --- | --- | --- |
-| `TOPDECK_API_KEY` | — | Clave de la API (obligatoria salvo `MOCK=1`) |
+| `TOPDECK_API_KEY` | — | Clave de la API. Sin ella no hay actualización en directo (se usa solo el seed); `MOCK=1` prueba sin clave |
+| `SEED_URL` | release `seed` del repositorio | De dónde se descarga el seed al arrancar (vacío = no descargar) |
 | `DAYS` | 180 | Histórico descargado (máximo elegible en la web) |
 | `PARTICIPANT_MIN` | 16 | Mínimo de jugadores por torneo |
 | `REFRESH_HOURS` | 6 | Frecuencia de actualización |
@@ -48,6 +49,17 @@ La primera carga descarga `DAYS` días (por defecto 180) en ventanas de 7 días,
 | `WINDOW_DAYS` | 3 | Días por petición al descargar (menos = menos memoria) |
 | `ALL_TOURNAMENTS` | — | `1` incluye también los torneos que no parecen cEDH (solo depuración) |
 | `DATA_DIR` | `./data` | Dónde guardar la caché |
+
+## Renovar el seed automáticamente
+
+`.github/workflows/update-seed.yml` renueva los datos cada 2 días (cron editable; a diario: `17 4 * * *`): parte del último seed publicado, descarga solo los días que faltan con `npm run seed:update`, comprueba que el resultado se lee y que no ha perdido datos (se aborta si pierde más del 10 %) y lo **publica como archivo de la release `seed`**, sobrescribiendo el anterior. No se hace ningún commit, así que el historial de git no crece. También se lanza a mano desde la pestaña Actions (Run workflow).
+
+El servidor, al arrancar sin caché en disco, descarga ese seed (`SEED_URL`, por defecto `https://github.com/Mariojp33/CEDH/releases/download/seed/records.json`; vacío = desactivado) y, si no puede (no existe aún, error de red o archivo roto), usa la copia que hay en el repositorio (`seed/records.json`, renovable a mano con `npm run seed`). Como los datos viven fuera del código, **actualizarlos no obliga a redesplegar**.
+
+Configuración:
+- En GitHub (Settings → Secrets and variables → Actions → **Secrets**): `TOPDECK_API_KEY`. Y en Settings → Actions → General, permisos de flujo «Read and write».
+- En Render (Environment): `TOPDECK_API_KEY`. La clave **no va en el código**. Sin ella el servidor no se cae: sirve los datos del seed y avisa de que no se actualiza.
+
 
 ## Despliegue
 

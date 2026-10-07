@@ -8,12 +8,14 @@ const { fetchTournaments } = require('./lib/topdeck');
 const { buildRecords, filterRecords, commanderList, classifyTournaments, neighborsReport, commanderReport, metaWinRate, decisive, decisiveSeats, validationReport, myListReport, packagesReport, trendReport, variantsReport, matchups, matrix, cardsVsOpponent } = require('./lib/stats');
 const cache = require('./lib/cache');
 const { parseText } = require('./lib/parse');
+const dataset = require('./lib/dataset');
 const { buildCardIndex, suggestCards, cardReport } = require('./lib/cardindex');
 const { mockTournaments } = require('./lib/mock');
 
 const PORT = Number(process.env.PORT) || 3000;
 const MOCK = process.env.MOCK === '1';
-const API_KEY = '73d1500b-e4d1-4981-857d-74a6e8ec2541';
+// La clave de TopDeck solo se lee del entorno (en Render: Environment → TOPDECK_API_KEY). Nunca va en el código.
+const API_KEY = process.env.TOPDECK_API_KEY;
 const DAYS = Number(process.env.DAYS) || 180; // máximo que se puede elegir en la web (6 meses)
 const PARTICIPANT_MIN = Number(process.env.PARTICIPANT_MIN) || 16;
 // Ventana de descarga en días: más pequeña = menos memoria por petición (más peticiones, 100/min permitidas).
@@ -25,50 +27,66 @@ const CACHE_FILE = path.join(DATA_DIR, 'records.json');
 // no persiste (p. ej. Render gratis): se carga al instante y solo se descargan los días que faltan.
 const SEED_FILE = path.join(__dirname, 'seed', 'records.json');
 const PUBLIC = path.join(__dirname, 'public');
+// Seed publicado por la tarea programada de GitHub como archivo de una «release» (que se sobrescribe en cada
+// ejecución y no engorda el historial de git). Al arrancar sin caché en disco se descarga de ahí; si falla,
+// se usa la copia del repositorio. SEED_URL='' lo desactiva.
+const DEFAULT_SEED_URL = 'https://github.com/Mariojp33/CEDH/releases/download/seed/records.json';
+const SEED_URL = process.env.SEED_URL === undefined ? DEFAULT_SEED_URL : process.env.SEED_URL;
 
 if (!MOCK && !API_KEY) {
-  console.error('Falta TOPDECK_API_KEY (consíguela gratis en https://topdeck.gg/developers). ' +
-    'Para probar sin clave: MOCK=1 node server.js');
-  process.exit(1);
+  // Sin clave el servidor no se cae: sirve los datos del seed y avisa de que no puede actualizarse.
+  console.warn('Falta TOPDECK_API_KEY (consíguela gratis en https://topdeck.gg/developers): se usarán solo los datos del seed, sin actualizaciones.');
 }
 
 // Estado en memoria. Los registros se guardan con `cards` como array para poder serializarlos.
 let state = { records: [], updatedAt: null, refreshing: false, error: null, coveredDays: 0, index: null };
 // Índice carta -> mazos (buscador). Se rehace cada vez que cambian los registros (al cargar y al actualizar).
 function rebuildIndex() { state.index = buildCardIndex(state.records); }
+const mb = () => Math.round(process.memoryUsage().rss / 1048576) + ' MB';
+const T0 = Date.now();
 
 // Solo se conservan los torneos cEDH. Los demás (casuales, precons, presupuesto, brawl…) se descartan al cargar
 // y al descargar; solo se recuerda cuántos mazos tenía cada uno para poder avisar de ello en la web.
 // ALL_TOURNAMENTS=1 los conserva (solo depuración).
 const KEEP_ALL = process.env.ALL_TOURNAMENTS === '1';
 const excluded = new Map(); // tid -> nº de mazos
-function keepCedh(records) {
-  classifyTournaments(records);
-  if (KEEP_ALL) return records;
-  const batch = new Map(), kept = [];
-  for (const r of records) {
-    if (r.comp === false) batch.set(r.tid, (batch.get(r.tid) || 0) + 1); else kept.push(r);
-  }
-  for (const [tid, n] of batch) excluded.set(tid, n);
-  return kept;
-}
+function keepCedh(records) { return dataset.splitCedh(records, excluded, { keepAll: KEEP_ALL }); }
 
 // La caché se guarda en formato compacto (lib/cache.js, v4). Se siguen leyendo las v3 anteriores.
 
-function loadCache() {
-  for (const file of [CACHE_FILE, SEED_FILE]) {
+async function fetchRemoteSeed(url, timeoutMs = 15000) {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { signal: ctl.signal, headers: { 'User-Agent': 'cedh-stats' } });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return JSON.parse(await res.text());
+  } finally { clearTimeout(timer); }
+}
+
+// Orígenes de los datos, por orden: caché en disco, seed publicado en GitHub, seed del repositorio.
+async function loadCache() {
+  const sources = [
+    { label: '', get: async () => JSON.parse(fs.readFileSync(CACHE_FILE, 'utf8')) },
+    ...(SEED_URL ? [{ label: ' (seed descargado de GitHub)', get: () => fetchRemoteSeed(SEED_URL) }] : []),
+    { label: ' (copia del repositorio)', get: async () => JSON.parse(fs.readFileSync(SEED_FILE, 'utf8')) },
+  ];
+  for (const { label, get } of sources) {
     try {
-      const j = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const j = await get();
       const records = cache.decodeAny(j);
-      if (!records) { console.log(`Caché ${path.basename(path.dirname(file))}/ de otra versión: se ignora`); continue; }
+      if (!records || records.length < 100) { console.log(`Datos${label} no válidos: se prueba el siguiente origen`); continue; }
       for (const [tid, n] of j.excluded || []) excluded.set(tid, n);
       state.records = keepCedh(records);
       rebuildIndex();
       state.updatedAt = j.updatedAt;
       state.coveredDays = j.days || 90; // las cachés anteriores solo guardaban 90 días
-      console.log(`Caché cargada${file === SEED_FILE ? ' (copia del repositorio)' : ''}: ${state.records.length} mazos (${j.updatedAt})`);
+      console.log(`Caché cargada${label}: ${state.records.length} mazos (${j.updatedAt}) · ${state.index.names.length} cartas indexadas · listo en ${((Date.now() - T0) / 1000).toFixed(1)} s · memoria ${mb()}`);
       return;
-    } catch { /* no existe o está dañada: se prueba la siguiente */ }
+    } catch (e) {
+      // El primero (caché en disco) falla siempre en una instalación nueva: solo se comenta el resto
+      if (label) console.log(`No se pudo usar el origen${label}: ${e.message}`);
+    }
   }
 }
 
@@ -83,6 +101,11 @@ function saveCache() {
 let retryTimer = null;
 async function refresh() {
   if (state.refreshing) return;
+  if (!MOCK && !API_KEY) {
+    state.error = 'Sin clave de TopDeck: se muestran los datos del seed, sin actualización en directo';
+    return;
+  }
+  const t0 = Date.now();
   state.refreshing = true;
   try {
     // Si la caché cubre menos días de los pedidos (p. ej. se subió DAYS), se descarga todo el periodo.
@@ -101,17 +124,14 @@ async function refresh() {
       });
     }
     fresh = keepCedh(fresh);
-    const freshTids = new Set(fresh.map(r => r.tid));
     const cutoff = Math.floor(Date.now() / 1000) - DAYS * 86400;
-    state.records = state.records
-      .filter(r => !freshTids.has(r.tid) && (MOCK || r.date >= cutoff))
-      .concat(fresh);
+    state.records = dataset.mergeFresh(state.records, fresh, { cutoff, keepOld: MOCK });
     rebuildIndex();
     state.updatedAt = new Date().toISOString();
     if (firstLoad) state.coveredDays = DAYS;
     state.error = null;
     if (!MOCK) saveCache();
-    console.log(`Actualizado: ${state.records.length} mazos`);
+    console.log(`Actualizado: ${state.records.length} mazos · ${Math.round((Date.now() - t0) / 1000)} s de descarga y proceso · memoria ${mb()}`);
   } catch (e) {
     state.error = e.message;
     console.error('Error al actualizar:', e.message);
@@ -300,7 +320,8 @@ function fail(res, e) {
 process.on('uncaughtException', e => console.error('Error no controlado:', e && e.stack || e));
 process.on('unhandledRejection', e => console.error('Promesa rechazada:', e && e.stack || e));
 
-loadCache();
-server.listen(PORT, () => console.log(`http://localhost:${PORT} ${MOCK ? '(modo demo)' : ''}`));
-refresh();
-setInterval(refresh, REFRESH_HOURS * 3600 * 1000).unref();
+loadCache().then(() => {
+  server.listen(PORT, () => console.log(`http://localhost:${PORT} ${MOCK ? '(modo demo)' : ''}`));
+  refresh();
+  setInterval(refresh, REFRESH_HOURS * 3600 * 1000).unref();
+});

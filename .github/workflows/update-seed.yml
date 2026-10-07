@@ -1,0 +1,70 @@
+# Renueva el seed de datos con los días nuevos de TopDeck y lo publica como archivo de una «release» de GitHub.
+# El archivo se SOBRESCRIBE en cada ejecución: no se hace ningún commit, así que el historial de git no crece.
+# El servidor lo descarga al arrancar (SEED_URL); si no puede, usa la copia que hay en el repositorio.
+# Se ejecuta cada 2 días; para hacerlo a diario cambia el cron por  '17 4 * * *'.
+# También se puede lanzar a mano desde la pestaña Actions (Run workflow).
+#
+# Hace falta guardar en el repositorio (Settings → Secrets and variables → Actions → Secrets):
+#   TOPDECK_API_KEY   la clave de la API de TopDeck.gg
+name: Actualizar datos (seed)
+
+on:
+  schedule:
+    - cron: '17 4 */2 * *'   # 04:17 UTC, los días impares del mes
+  workflow_dispatch:
+
+permissions:
+  contents: write            # para crear y actualizar la release
+
+concurrency:
+  group: actualizar-seed
+  cancel-in-progress: false
+
+jobs:
+  actualizar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Parte del seed publicado en la release (si existe); si no, del que hay en el repositorio
+      - name: Recuperar el último seed publicado
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release download seed --pattern records.json --output /tmp/records.json --repo "$GITHUB_REPOSITORY" 2>/dev/null; then
+            cp /tmp/records.json seed/records.json
+            echo "Se parte del seed publicado en la release."
+          else
+            echo "No hay release «seed» todavía: se parte del seed del repositorio."
+          fi
+
+      - name: Descargar los días nuevos y renovar el seed
+        env:
+          TOPDECK_API_KEY: ${{ secrets.TOPDECK_API_KEY }}
+        run: node scripts/update-seed.js
+
+      - name: Comprobar que el seed se lee bien
+        run: |
+          node -e "
+          const fs = require('fs'), cache = require('./lib/cache');
+          const j = JSON.parse(fs.readFileSync('seed/records.json', 'utf8'));
+          const r = cache.decodeAny(j);
+          console.log('Seed: versión', j.version, '·', r.length, 'mazos ·', j.updatedAt);
+          if (!r || r.length < 10000) { console.error('Seed sospechosamente pequeño'); process.exit(1); }
+          "
+
+      - name: Publicar el seed en la release (sobrescribe el anterior)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view seed --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create seed --repo "$GITHUB_REPOSITORY" --title "Seed de datos" \
+              --notes "Datos de torneos para arrancar el servidor. Se sobrescribe en cada actualización automática." \
+              --latest=false
+          fi
+          gh release upload seed seed/records.json --repo "$GITHUB_REPOSITORY" --clobber
+          echo "Seed publicado: https://github.com/$GITHUB_REPOSITORY/releases/download/seed/records.json"

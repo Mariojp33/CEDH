@@ -361,7 +361,9 @@ function bindCardSearch() {
     timer = setTimeout(async () => {
       try {
         const r = await api('/api/cards?q=' + encodeURIComponent(v));
-        box.innerHTML = r.map(x => `<button type="button" class="chip" data-n="${esc(x.card)}">${esc(x.card)} <small>${x.decks}</small></button>`).join('');
+        // Cada sugerencia: nombre de la carta y, apagado, cuántos mazos la llevan; la imagen sale al pasar el ratón
+        box.innerHTML = r.map(x => `<button type="button" class="sug" data-n="${esc(x.card)}" data-card="${esc(x.card)}">
+          <span class="nm">${esc(x.card)}</span><span class="ct">${x.decks.toLocaleString('es-ES')} ${x.decks === 1 ? 'mazo' : 'mazos'}</span></button>`).join('');
         box.querySelectorAll('button').forEach(b => { b.onclick = () => pick(b.dataset.n); });
       } catch { box.innerHTML = ''; }
     }, 150);
@@ -445,7 +447,7 @@ function renderList() {
       <div class="muted" style="margin-bottom:8px">Escribe el nombre de una carta y mira en qué comandantes se juega, cuánto, si sube o baja y qué cartas suelen acompañarla. Solo mira lo que se juega en torneos cEDH, no si «funciona» mejor.</div>
       <label class="sr" for="cs-q">Nombre de la carta</label>
       <input type="search" id="cs-q" placeholder="Rhystic Study, Thassa's Oracle…" autocomplete="off">
-      <div id="cs-sug" class="chips" style="margin-top:8px"></div>
+      <div id="cs-sug" class="sugs" role="listbox" aria-label="Sugerencias de cartas"></div>
     </div>
     <div id="cs-out"></div>`) +
     tabPanel('matriz', active, `
