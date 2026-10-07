@@ -85,3 +85,49 @@ test('buscador de cartas: sugerencias e informe por la API, con filtros y caché
   assert.strictEqual((await get('/api/card?name=' + encodeURIComponent('Carta que no existe zzz'))).status, 404);
   assert.strictEqual((await get('/api/card')).status, 404);
 });
+
+test('meta del momento, novedades y alternativas por la API', async () => {
+  for (const dec of [0, 1]) {
+    const m = await get(`/api/meta?days=90&dec=${dec}`);
+    assert.strictEqual(m.status, 200);
+    const j = JSON.parse(m.body);
+    assert.ok(j.commanders.length >= 3 && j.buckets.length === 6 && j.mean > 0);
+    assert.ok(j.commanders.every(c => ['S', 'A', 'B', 'C', 'D'].includes(c.tier) && c.series.length === 6));
+  }
+  const n = JSON.parse((await get('/api/novelties')).body);
+  assert.ok(n.tooFew || (Array.isArray(n.rising) && Array.isArray(n.falling) && Array.isArray(n.fresh)));
+  const kin = encodeURIComponent('Kinnan, Bonder Prodigy');
+  const a = await get(`/api/card-alternatives?name=${encodeURIComponent("Thassa's Oracle")}&commander=${kin}&days=180`);
+  assert.strictEqual(a.status, 200);
+  assert.ok('alternatives' in JSON.parse(a.body));
+  assert.strictEqual((await get('/api/card-alternatives?name=zzz&commander=' + kin)).status, 404);
+  assert.strictEqual((await get('/api/card-alternatives?name=' + encodeURIComponent("Thassa's Oracle"))).status, 404, 'sin comandante');
+});
+
+test('preparar mesa y núcleo/huecos por la API', async () => {
+  const me = encodeURIComponent('Kinnan, Bonder Prodigy');
+  const mu = JSON.parse((await get(`/api/matchups?name=${me}&days=180&dec=1`)).body);
+  const rival = mu.rows.length ? mu.rows[0].opponent : 'Najeela, the Blade-Blossom';
+  const r = await get(`/api/table?me=${me}&r1=${encodeURIComponent(rival)}&days=180&dec=1`);
+  assert.strictEqual(r.status, 200);
+  const j = JSON.parse(r.body);
+  assert.strictEqual(j.me, 'Kinnan, Bonder Prodigy');
+  assert.strictEqual(j.rows.length, 1);
+  assert.ok(j.pods > 0 && Array.isArray(j.cards) && j.cards[0].rival === rival);
+  assert.strictEqual((await get('/api/table?me=zzz&days=180')).status, 404);
+  const v = JSON.parse((await get(`/api/variants?name=${me}&k=3&detail=1&days=180&dec=1`)).body);
+  assert.ok(v.variants.length >= 1 && v.variants[0].detail.core.length > 0);
+  const sin = JSON.parse((await get(`/api/variants?name=${me}&k=3&days=180&dec=1`)).body);
+  assert.ok(!('detail' in sin.variants[0]));
+});
+
+test('cartas a tener en cuenta por la API', async () => {
+  const kin = encodeURIComponent('Kinnan, Bonder Prodigy');
+  const r = await get(`/api/threats?name=${kin}&days=180&dec=1`);
+  assert.strictEqual(r.status, 200);
+  const j = JSON.parse(r.body);
+  assert.strictEqual(j.commander, 'Kinnan, Bonder Prodigy');
+  assert.deepStrictEqual(j.categories.map(c => c.id), ['finishers', 'interaction', 'tutors', 'mana', 'hate']);
+  assert.ok(j.decks > 50 && Array.isArray(j.defining) && j.categories.every(c => typeof c.avg === 'number' && Array.isArray(c.cards)));
+  assert.strictEqual((await get('/api/threats?name=zzz')).status, 404);
+});

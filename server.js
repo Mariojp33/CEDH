@@ -5,11 +5,15 @@ const zlib = require('node:zlib');
 const fs = require('node:fs');
 const path = require('node:path');
 const { fetchTournaments } = require('./lib/topdeck');
-const { buildRecords, filterRecords, commanderList, classifyTournaments, neighborsReport, commanderReport, metaWinRate, decisive, decisiveSeats, validationReport, myListReport, packagesReport, trendReport, variantsReport, matchups, matrix, cardsVsOpponent } = require('./lib/stats');
+const { BASICS, buildRecords, filterRecords, commanderList, classifyTournaments, neighborsReport, commanderReport, metaWinRate, decisive, decisiveSeats, validationReport, myListReport, packagesReport, trendReport, variantsReport, matchups, matrix, cardsVsOpponent } = require('./lib/stats');
 const cache = require('./lib/cache');
 const { parseText } = require('./lib/parse');
 const dataset = require('./lib/dataset');
-const { buildCardIndex, suggestCards, cardReport } = require('./lib/cardindex');
+const { buildCardIndexAsync, suggestCards, cardReport, noveltiesReport, alternativesReport } = require('./lib/cardindex');
+const { metaReport } = require('./lib/meta');
+const { tableReport } = require('./lib/table');
+const combos = require('./lib/combos');
+const threats = require('./lib/threats');
 const { mockTournaments } = require('./lib/mock');
 
 const PORT = Number(process.env.PORT) || 3000;
@@ -39,9 +43,20 @@ if (!MOCK && !API_KEY) {
 }
 
 // Estado en memoria. Los registros se guardan con `cards` como array para poder serializarlos.
-let state = { records: [], updatedAt: null, refreshing: false, error: null, coveredDays: 0, index: null };
-// Índice carta -> mazos (buscador). Se rehace cada vez que cambian los registros (al cargar y al actualizar).
-function rebuildIndex() { state.index = buildCardIndex(state.records); }
+let state = { records: [], updatedAt: null, refreshing: false, error: null, coveredDays: 0, index: null, indexPromise: null };
+// Índice carta -> mazos (buscador). Se rehace en segundo plano cada vez que cambian los registros (al cargar y al
+// actualizar), sin retrasar el arranque; las peticiones del buscador esperan a que esté listo.
+function rebuildIndex() {
+  const records = state.records, t = Date.now();
+  state.index = null;
+  state.indexPromise = buildCardIndexAsync(records).then(ix => {
+    if (state.records !== records) return state.index;      // los datos cambiaron mientras tanto: otro índice viene detrás
+    state.index = ix;
+    console.log(`Índice de cartas listo: ${ix.names.length} cartas en ${((Date.now() - t) / 1000).toFixed(1)} s`);
+    return ix;
+  });
+  return state.indexPromise;
+}
 const mb = () => Math.round(process.memoryUsage().rss / 1048576) + ' MB';
 const T0 = Date.now();
 
@@ -77,11 +92,12 @@ async function loadCache() {
       const records = cache.decodeAny(j);
       if (!records || records.length < 100) { console.log(`Datos${label} no válidos: se prueba el siguiente origen`); continue; }
       for (const [tid, n] of j.excluded || []) excluded.set(tid, n);
-      state.records = keepCedh(records);
+      // Un seed guardado por esta versión ya viene filtrado (lleva la lista `excluded`): no hace falta volver a clasificar
+      state.records = Array.isArray(j.excluded) ? records : keepCedh(records);
       rebuildIndex();
       state.updatedAt = j.updatedAt;
       state.coveredDays = j.days || 90; // las cachés anteriores solo guardaban 90 días
-      console.log(`Caché cargada${label}: ${state.records.length} mazos (${j.updatedAt}) · ${state.index.names.length} cartas indexadas · listo en ${((Date.now() - T0) / 1000).toFixed(1)} s · memoria ${mb()}`);
+      console.log(`Caché cargada${label}: ${state.records.length} mazos (${j.updatedAt}) · listo en ${((Date.now() - T0) / 1000).toFixed(1)} s · memoria ${mb()}`);
       return;
     } catch (e) {
       // El primero (caché en disco) falla siempre en una instalación nueva: solo se comenta el resto
@@ -178,7 +194,43 @@ function serveStatic(res, file) {
 const memo = new Map();
 let memoStamp = null;
 const seatCache = { stamp: null, map: new Map() };
-const MEMO_PATHS = new Set(['/api/card', '/api/packages', '/api/variants', '/api/trend', '/api/matchups', '/api/matrix', '/api/cards-vs', '/api/validation']);
+const MEMO_PATHS = new Set(['/api/threats', '/api/table', '/api/card', '/api/card-alternatives', '/api/novelties', '/api/meta', '/api/packages', '/api/variants', '/api/trend', '/api/matchups', '/api/matrix', '/api/cards-vs', '/api/validation']);
+
+// ---- Combos y amenazas (Commander Spellbook) ----
+// Se consulta a Spellbook solo cuando alguien abre los combos de un comandante; el resultado se guarda 24 h y las
+// consultas simultáneas del mismo comandante comparten una sola petición. El uso se calcula siempre sobre nuestros mazos.
+const COMBOS_API = process.env.COMBOS_API || combos.DEFAULT_API;
+const comboCache = new Map();      // comandante -> { t, data }
+const comboInflight = new Map();   // comandante -> promesa de la petición en curso
+const COMBO_TTL = 24 * 3600 * 1000;
+const comboHits = new Map();       // ip -> marcas de tiempo de sus peticiones que han ido a Spellbook
+function limitedCombos(req) {
+  const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '?').split(',')[0].trim();
+  const now = Date.now(), hits = (comboHits.get(ip) || []).filter(t => now - t < 60000);
+  hits.push(now); comboHits.set(ip, hits);
+  if (comboHits.size > 5000) comboHits.clear();
+  return hits.length > 8;
+}
+async function commanderCombos(key, req) {
+  const hit = comboCache.get(key);
+  if (hit && Date.now() - hit.t < COMBO_TTL) return { data: hit.data, t: hit.t };
+  if (comboInflight.has(key)) return { data: await comboInflight.get(key), t: Date.now() };
+  const decks = state.records.filter(r => r.key === key);
+  if (decks.length < 50) throw new combos.ComboApiError('Hacen falta al menos 50 mazos de este comandante para buscar combos', 404);
+  if (limitedCombos(req)) throw new combos.ComboApiError('Demasiadas búsquedas de combos seguidas; espera un minuto', 429);
+  const request = combos.unionRequest(decks, key.split(' / '), BASICS);
+  const p = combos.fetchCombos({ ...request, api: COMBOS_API }).then(combos.compact).finally(() => comboInflight.delete(key));
+  comboInflight.set(key, p);
+  try {
+    const data = await p;
+    if (comboCache.size >= 60) comboCache.clear();
+    comboCache.set(key, { t: Date.now(), data });
+    return { data, t: Date.now() };
+  } catch (e) {
+    if (hit) return { data: hit.data, t: hit.t, stale: true };   // si Spellbook falla, se usa la última respuesta buena
+    throw e;
+  }
+}
 
 const handle = (req, res) => {
   const url = new URL(req.url, 'http://x');
@@ -262,14 +314,67 @@ const handle = (req, res) => {
     const rep = name && trendReport(dec ? decisive(all) : all, name);
     return rep ? send(200, rep) : send(404, { error: 'Comandante sin datos' });
   }
-  if (url.pathname === '/api/cards') {
-    // Sugerencias del buscador de cartas
-    return json(res, 200, state.index ? suggestCards(state.index, url.searchParams.get('q')) : []);
-  }
-  if (url.pathname === '/api/card') {
+  if (url.pathname === '/api/combos') {
     const name = url.searchParams.get('name');
-    const rep = name && state.index && cardReport(state.index, state.records, name, { minPlayers, maxPlayers, days });
-    return rep ? send(200, rep) : send(404, { error: 'Carta no encontrada en los mazos de este periodo' });
+    if (!name) return json(res, 404, { error: 'Falta el comandante' });
+    const ready = state.index ? Promise.resolve() : (state.indexPromise || Promise.resolve());
+    ready.then(async () => {
+      try {
+        const { data, t, stale } = await commanderCombos(name, req);
+        const ix = state.index;
+        const metaShare = c => { const id = ix && ix.ids.get(c.toLowerCase()); return id === undefined || !ix ? 0 : ix.decks[id].length / (ix.size || 1); };
+        const out = combos.summarize(data, records.filter(r => r.key === name), name.split(' / '), { metaShare });
+        return json(res, 200, { commander: name, ...out, fetchedAt: t, stale: !!stale });
+      } catch (e) {
+        if (e instanceof combos.ComboApiError) return json(res, e.status, { error: e.message });
+        fail(res, e);
+      }
+    });
+    return;
+  }
+  if (url.pathname === '/api/meta') {
+    // Meta del momento: presencia, resultados con intervalo, niveles, evolución y empates
+    const all = filterRecords(state.records, { minPlayers, maxPlayers });
+    const allView = dec ? decisive(all) : all;
+    const period = days ? filterRecords(allView, { days }) : allView;
+    return send(200, metaReport(allView, period));
+  }
+  if (['/api/cards', '/api/card', '/api/card-alternatives', '/api/novelties', '/api/table', '/api/threats'].includes(url.pathname)) {
+    // Consultas por carta: esperan al índice si aún se está construyendo (justo tras arrancar o actualizar)
+    const ready = state.index ? Promise.resolve(state.index) : (state.indexPromise || Promise.resolve(null));
+    ready.then(() => {
+      try {
+        const ix = state.index, q = url.searchParams;
+        if (!ix) return json(res, 503, { error: 'El buscador se está preparando; prueba en unos segundos' });
+        if (url.pathname === '/api/cards') return json(res, 200, suggestCards(ix, q.get('q')));
+        if (url.pathname === '/api/novelties') return send(200, noveltiesReport(ix, state.records, { minPlayers, maxPlayers }));
+        if (url.pathname === '/api/threats') {
+          // Cartas a tener en cuenta de un comandante: lo que lo define y remates, interacción, tutores, maná y odio
+          const name = q.get('name');
+          const shareOf = c => { const id = ix.ids.get(c.toLowerCase()); return id === undefined ? 0 : ix.decks[id].length / (ix.size || 1); };
+          const rep = name && commanderReport(view, name, { minWith: 5, minWithout: 5 });
+          if (!rep) return send(404, { error: 'Comandante sin datos con estos filtros' });
+          const decks = records.filter(r => r.key === name);
+          return send(200, { commander: name, ...threats.threatProfile(decks, shareOf),
+            defining: threats.definingCards(rep.popular, shareOf, { isBasic: c => BASICS.has(c.toLowerCase()) }) });
+        }
+        if (url.pathname === '/api/table') {
+          // Preparar mesa: tu comandante (me) y hasta tres rivales (r1, r2, r3)
+          const me = q.get('me'), rivals = ['r1', 'r2', 'r3'].map(k => q.get(k)).filter(Boolean);
+          const metaShare = c => { const id = ix.ids.get(c.toLowerCase()); return id === undefined ? 0 : ix.decks[id].length / (ix.size || 1); };
+          const rep = me && tableReport(seatRecords(), view, me, rivals, { metaShare });
+          return rep ? send(200, rep) : send(404, { error: 'Comandante sin mesas registradas con estos filtros' });
+        }
+        const name = q.get('name');
+        if (url.pathname === '/api/card-alternatives') {
+          const rep = name && alternativesReport(ix, state.records, name, q.get('commander'), { minPlayers, maxPlayers, days });
+          return rep ? send(200, rep) : send(404, { error: 'Carta o comandante no encontrados' });
+        }
+        const rep = name && cardReport(ix, state.records, name, { minPlayers, maxPlayers, days });
+        return rep ? send(200, rep) : send(404, { error: 'Carta no encontrada en los mazos de este periodo' });
+      } catch (e) { fail(res, e); }
+    });
+    return;
   }
   if (url.pathname === '/api/packages') {
     // Paquetes (cartas que se juegan juntas) y alternativas (cartas que casi nunca coinciden), dentro de un comandante
@@ -279,7 +384,7 @@ const handle = (req, res) => {
   }
   if (url.pathname === '/api/variants') {
     const name = url.searchParams.get('name');
-    const rep = name && variantsReport(view, name, { k: parseInt(url.searchParams.get('k'), 10) || 3 });
+    const rep = name && variantsReport(view, name, { k: parseInt(url.searchParams.get('k'), 10) || 3, detail: url.searchParams.get('detail') === '1' });
     return rep ? send(200, rep) : send(404, { error: 'Comandante sin datos' });
   }
   if (url.pathname === '/api/matchups') {

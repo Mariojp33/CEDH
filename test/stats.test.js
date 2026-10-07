@@ -456,3 +456,163 @@ test('rendimiento: el índice y las consultas por carta caben en presupuestos de
   const [msMu] = time(() => matchups(d, KINNAN, { minPods: 15 }));
   assert.ok(msMu < 500, `matchups con asientos ya preparados: ${msMu.toFixed(0)} ms`);
 });
+
+test('índice de cartas asíncrono: idéntico al síncrono', async () => {
+  const { buildCardIndex, buildCardIndexAsync } = require('../lib/cardindex');
+  const recs = buildRecords(mockTournaments()).slice(0, 4000);
+  const a = buildCardIndex(recs), b = await buildCardIndexAsync(recs, 700);   // varios trozos
+  assert.strictEqual(b.names.length, a.names.length);
+  assert.strictEqual(b.size, a.size);
+  for (let i = 0; i < a.names.length; i += 37) {
+    assert.strictEqual(b.names[i], a.names[i]);
+    assert.deepStrictEqual([...b.decks[i]], [...a.decks[i]]);
+  }
+});
+
+// ---------- Meta del momento, novedades y alternativas ----------
+const NOW = () => Math.floor(Date.now() / 1000);
+const mkDeck = (key, cards, { age = 1, wins = 1, losses = 3, draws = 0, tid = 't' + Math.random() } = {}) =>
+  ({ key, tid, tournament: 'T', date: NOW() - age * 86400, size: 30, player: 'p', cards: new Set(cards), wins, losses, draws, games: wins + losses + draws, seats: [] });
+
+test('metaReport: niveles por intervalo de confianza, presencia por mes y empates', () => {
+  const { metaReport } = require('../lib/meta');
+  const recs = [];
+  for (let i = 0; i < 300; i++) recs.push(mkDeck('Fuerte', ['A'], { age: 5 + (i % 150), wins: 2, losses: 3 }));            // 40 %
+  for (let i = 0; i < 300; i++) recs.push(mkDeck('Medio', ['A'], { age: 5 + (i % 150), wins: 1, losses: 3 }));             // 25 %
+  for (let i = 0; i < 300; i++) recs.push(mkDeck('Flojo', ['A'], { age: 5 + (i % 150), wins: 1, losses: 8, draws: 1 }));   // ~10 %
+  for (let i = 0; i < 45; i++) recs.push(mkDeck('Pocos', ['A'], { age: 5 + (i % 100), wins: 4, losses: 1 }));              // 80 % pero pocas partidas
+  const r = metaReport(recs, recs, { minDecks: 40 });
+  const t = Object.fromEntries(r.commanders.map(c => [c.commander, c.tier]));
+  assert.ok(['S', 'A'].includes(t.Fuerte), 'claramente por encima de la media: ' + t.Fuerte);
+  assert.ok(['C', 'D'].includes(t.Flojo), 'claramente por debajo: ' + t.Flojo);
+  assert.ok(['B', 'A', 'S'].includes(t.Pocos) && t.Pocos !== undefined);
+  assert.strictEqual(r.commanders.find(c => c.commander === 'Flojo').drawRate > 0, true);
+  assert.strictEqual(r.buckets.length, 6);
+  assert.strictEqual(r.commanders[0].series.length, 6);
+  assert.ok(r.commanders.every(c => c.series.every(x => x >= 0 && x <= 1)));
+  assert.ok(r.mean > 0 && r.mean < 1);
+});
+
+test('noveltiesReport: detecta cartas nuevas, en ascenso y en descenso, ignorando el ruido', () => {
+  const { buildCardIndex, noveltiesReport } = require('../lib/cardindex');
+  const recs = [];
+  const put = (n, age, cards) => { for (let i = 0; i < n; i++) recs.push(mkDeck('K', cards, { age: age + (i % 15) })); };
+  put(150, 120, ['Estable', 'Baja', 'Sube']);                              // inicio de los datos (hace ~4 meses): ya existen todas menos Nueva
+  put(300, 40, ['Estable', 'Baja']); put(100, 40, ['Estable', 'Sube']);   // base: Baja ~75 %, Sube ~25 %
+  put(100, 2, ['Estable', 'Baja']); put(300, 2, ['Estable', 'Sube']);     // reciente: Baja ~25 %, Sube ~75 %
+  put(150, 2, ['Estable', 'Nueva']);                                      // Nueva solo aparece ahora
+  const n = noveltiesReport(buildCardIndex(recs), recs, {});
+  assert.ok(n.fresh.some(c => c.card === 'Nueva'), 'carta que no existía antes');
+  assert.ok(n.rising.some(c => c.card === 'Sube'));
+  assert.ok(n.falling.some(c => c.card === 'Baja'));
+  assert.ok(![...n.rising, ...n.falling, ...n.fresh].some(c => c.card === 'Estable'), 'lo estable no es novedad');
+  assert.ok(n.rising.every(c => c.change >= 0.02) && n.falling.every(c => c.change <= -0.02));
+  assert.ok(n.fresh[0].commanders[0].commander === 'K', 'indica dónde se juega');
+  const few = recs.slice(0, 50);
+  assert.ok(noveltiesReport(buildCardIndex(few), few, {}).tooFew);
+});
+
+test('alternativesReport: compara solo mazos parecidos, no otro plan de juego', () => {
+  const { buildCardIndex, alternativesReport } = require('../lib/cardindex');
+  const recs = [];
+  const core = Array.from({ length: 30 }, (_, i) => 'Base' + i);
+  for (let i = 0; i < 100; i++) recs.push(mkDeck('K', [...core, 'Objetivo', 'P' + (i % 3)]));          // con la carta
+  for (let i = 0; i < 70; i++) recs.push(mkDeck('K', [...core, 'Sustituto', 'P' + (i % 3)]));          // sin ella, mismo plan
+  for (let i = 0; i < 80; i++) recs.push(mkDeck('K', Array.from({ length: 30 }, (_, k) => 'OtroPlan' + k)));   // otro plan: no debe contar
+  const idx = buildCardIndex(recs);
+  const r = alternativesReport(idx, recs, 'objetivo', 'K', {});
+  assert.strictEqual(r.withCard, 100); assert.strictEqual(r.withoutCard, 150);
+  assert.strictEqual(r.similar, 70, 'solo los 70 que se parecen a los que la llevan');
+  assert.strictEqual(r.alternatives[0].card, 'Sustituto');
+  assert.ok(!r.alternatives.some(a => a.card.startsWith('OtroPlan')), 'sin cartas de otro plan');
+  assert.ok(alternativesReport(idx, recs, 'Base1', 'K', {}).tooFew, 'una carta que llevan todos no tiene alternativas');
+  assert.strictEqual(alternativesReport(idx, recs, 'No existe', 'K', {}), null);
+});
+
+test('rendimiento: meta, novedades y alternativas dentro de presupuestos de tiempo generosos', () => {
+  const { buildCardIndex, noveltiesReport, alternativesReport } = require('../lib/cardindex');
+  const { metaReport } = require('../lib/meta');
+  const recs = buildRecords(mockTournaments());
+  const idx = buildCardIndex(recs);
+  const time = f => { const t = process.hrtime.bigint(); f(); return Number(process.hrtime.bigint() - t) / 1e6; };
+  const ms1 = time(() => metaReport(recs, recs, {})); assert.ok(ms1 < 500, `meta ${ms1.toFixed(0)} ms`);
+  const ms2 = time(() => noveltiesReport(idx, recs, {})); assert.ok(ms2 < 800, `novedades ${ms2.toFixed(0)} ms`);
+  const ms3 = time(() => alternativesReport(idx, recs, 'Sol Ring', KINNAN, { days: 90 })); assert.ok(ms3 < 300, `alternativas ${ms3.toFixed(0)} ms`);
+});
+
+test('tableReport: matchups por rival, mesas con varios rivales y cartas que los distinguen', () => {
+  const { tableReport } = require('../lib/table');
+  const seat = (w, o) => ({ w, n: 4, o });
+  const seatsMe = [];
+  // Con el rival X: 100 mesas con 10 victorias. Sin él: 300 mesas con 105 victorias.
+  for (let i = 0; i < 100; i++) seatsMe.push(seat(i < 10 ? 1 : 0, ['X', 'Z', 'Z']));
+  for (let i = 0; i < 300; i++) seatsMe.push(seat(i < 105 ? 1 : 0, ['Z', 'Z', 'Z']));
+  for (let i = 0; i < 5; i++) seatsMe.push(seat(0, ['X', 'Y', 'Z']));                      // X e Y juntos: muy pocas mesas
+  const me = { key: 'Yo', tid: 't', date: 1, size: 20, cards: new Set(['A']), wins: 0, losses: 0, draws: 0, games: 1, seats: seatsMe };
+  const mkDeck2 = (key, cards) => ({ key, tid: 't', date: 1, size: 20, cards: new Set(cards), wins: 1, losses: 1, draws: 0, games: 2, seats: [] });
+  const view = [me];
+  for (let i = 0; i < 40; i++) view.push(mkDeck2('X', ['Comun', 'SoloX', 'Otra' + (i % 2)]));
+  for (let i = 0; i < 40; i++) view.push(mkDeck2('Y', ['Comun', 'SoloY', 'Otra' + (i % 2)]));
+  for (let i = 0; i < 200; i++) view.push(mkDeck2('Z', ['Comun', 'ZZ' + (i % 5)]));
+  const r = tableReport([me], view, 'Yo', ['X', 'Y']);
+  const x = r.rows.find(q => q.rival === 'X');
+  assert.strictEqual(x.pods, 105);
+  assert.ok(Math.abs(x.winRateWithout - 105 / 300) < 1e-9 && x.enough && x.lift < 0 && x.z < -2);
+  const y = r.rows.find(q => q.rival === 'Y');
+  assert.strictEqual(y.pods, 5); assert.strictEqual(y.enough, false, 'con 5 mesas no se concluye nada');
+  assert.strictEqual(r.all.pods, 5); assert.strictEqual(r.all.enough, false);
+  assert.strictEqual(r.any.pods, 105);
+  // Cartas distintivas: SoloX distingue a X porque casi nadie más la lleva; Comun la lleva todo el meta
+  const cx = r.cards.find(c => c.rival === 'X');
+  assert.ok(cx.distinctive.some(c => c.card === 'SoloX') && !cx.distinctive.some(c => c.card === 'Comun'));
+  assert.strictEqual(tableReport([me], view, 'No existe', ['X']), null);
+  // con un solo rival no hay «mesas con varios» ni cartas compartidas
+  const one = tableReport([me], view, 'Yo', ['X']);
+  assert.strictEqual(one.any, null); assert.deepStrictEqual(one.shared, []);
+});
+
+test('variantsReport con detalle: núcleo, huecos de decisión y plazas abiertas', () => {
+  const recs = buildRecords(mockTournaments());
+  assert.ok(variantsReport(recs, KINNAN, { k: 3 }).variants.every(v => !('detail' in v)), 'sin pedirlo no se calcula');
+  const v = variantsReport(recs, KINNAN, { k: 3, detail: true });
+  assert.ok(v.variants.length >= 1);
+  for (const x of v.variants) {
+    const d = x.detail;
+    assert.strictEqual(d.decks, x.decks);
+    assert.ok(d.core.every(c => c.p >= 0.8 && c.p <= 1) && d.flex.every(c => c.p >= 0.2 && c.p < 0.8) && d.tech.every(c => c.p >= 0.05 && c.p < 0.2));
+    assert.ok(d.flexCount >= d.flex.length && d.openSlots >= 0 && d.avgCards > d.core.length);
+    assert.ok(d.flex.every((c, i) => i === 0 || Math.abs(d.flex[i - 1].p - 0.5) <= Math.abs(c.p - 0.5) + 1e-12), 'los huecos más abiertos primero');
+    assert.ok(![...d.core, ...d.flex, ...d.tech].some(c => ['island', 'swamp', 'forest', 'mountain', 'plains'].includes(c.card.toLowerCase())));
+  }
+});
+
+test('threatProfile: cartas por función frente al meta, y las que definen al mazo', () => {
+  const { threatProfile, definingCards, CATEGORIES } = require('../lib/threats');
+  const mk = cards => ({ cards: new Set(cards) });
+  const decks = [];
+  for (let i = 0; i < 100; i++) {
+    const c = ['Sol Ring'];
+    if (i < 90) c.push('Force of Will');             // interacción: 90 %
+    if (i < 30) c.push('Demonic Tutor');             // tutor: 30 %
+    if (i < 5) c.push('Mystical Tutor');             // 5 %: no llega al mínimo para mostrarse
+    if (i < 80) c.push('Carta Propia');
+    decks.push(mk(c));
+  }
+  const meta = { 'Force of Will': 0.6, 'Demonic Tutor': 0.5, 'Sol Ring': 0.98, 'Mystical Tutor': 0.3, 'Carta Propia': 0.02 };
+  const r = threatProfile(decks, c => meta[c] ?? 0);
+  assert.strictEqual(r.decks, 100);
+  assert.deepStrictEqual(r.categories.map(c => c.id), CATEGORIES.map(c => c.id));
+  const inter = r.categories.find(c => c.id === 'interaction'), tut = r.categories.find(c => c.id === 'tutors');
+  assert.deepStrictEqual(inter.cards.map(c => c.card), ['Force of Will']);
+  assert.ok(Math.abs(inter.avg - 0.9) < 1e-9 && Math.abs(inter.metaAvg - 0.6) < 1e-9);
+  assert.deepStrictEqual(tut.cards.map(c => c.card), ['Demonic Tutor'], 'Mystical Tutor (5 %) no se muestra');
+  assert.ok(Math.abs(tut.avg - 0.35) < 1e-9, 'la media cuenta todas las cartas de la categoría, también las poco usadas');
+  assert.strictEqual(threatProfile([], () => 0).decks, 0);
+  // Lo que define al mazo: mucho más que el meta, no lo que juega todo el mundo
+  const popular = [{ card: 'Sol Ring', inclusion: 1 }, { card: 'Carta Propia', inclusion: 0.8 }, { card: 'Force of Will', inclusion: 0.9 }, { card: 'Island', inclusion: 1 }];
+  const def = definingCards(popular, c => meta[c] ?? 0, { isBasic: c => c === 'Island' });
+  assert.deepStrictEqual(def.map(c => c.card), ['Carta Propia', 'Force of Will']);
+  // las listas no repiten cartas dentro de una categoría ni usan cartas prohibidas
+  for (const cat of CATEGORIES) assert.strictEqual(new Set(cat.cards).size, cat.cards.length, cat.id + ' tiene cartas repetidas');
+  assert.ok(!CATEGORIES.some(c => c.cards.some(x => ['Mana Crypt', 'Jeweled Lotus', 'Dockside Extortionist'].includes(x))));
+});

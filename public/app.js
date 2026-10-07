@@ -142,8 +142,8 @@ const store = {
 // ---- Pestañas ----
 // Cada pestaña carga sus datos la primera vez que se abre (así no se calculan sinergias o variantes si nadie las mira).
 const TABS = {
-  list: [['comandantes', 'Comandantes'], ['cartas', 'Buscar carta'], ['matriz', 'Matriz de matchups'], ['fiabilidad', 'Fiabilidad del método']],
-  cmd: [['cartas', 'Cartas'], ['matchups', 'Matchups'], ['evolucion', 'Evolución'], ['variantes', 'Variantes y paquetes'], ['lista', 'Mi lista']],
+  list: [['comandantes', 'Comandantes'], ['meta', 'Meta del momento'], ['novedades', 'Novedades'], ['mesa', 'Preparar mesa'], ['cartas', 'Buscar carta'], ['matriz', 'Matriz de matchups'], ['fiabilidad', 'Fiabilidad del método']],
+  cmd: [['cartas', 'Cartas'], ['matchups', 'Matchups'], ['evolucion', 'Evolución'], ['variantes', 'Variantes y paquetes'], ['combos', 'Combos y amenazas'], ['lista', 'Mi lista']],
 };
 const pickTab = kind => TABS[kind].some(t => t[0] === view.tab) ? view.tab : TABS[kind][0][0];
 const tabsHtml = (kind, active) => `<div class="tabs" role="tablist" aria-label="Secciones">${TABS[kind].map(([id, label]) =>
@@ -307,7 +307,9 @@ async function loadStatus() {
   $('#banners').innerHTML =
     (st.mock ? '<div class="banner demo"><b>Modo demo:</b> datos sintéticos generados localmente, no son resultados reales.</div>' : '') +
     (st.coveredDays && F.days > st.coveredDays ? `<div class="banner demo">Solo hay datos de los últimos ${st.coveredDays} días${st.refreshing ? '; se está descargando el resto, recarga en unos minutos' : ''}, así que este periodo muestra lo mismo que ${st.coveredDays} días.</div>` : '') +
-    (st.error ? `<div class="banner">Error al actualizar: ${esc(st.error)}</div>` : '');
+    (st.error ? (/^Sin clave/.test(st.error)
+      ? `<div class="banner demo"><b>Aviso:</b> ${esc(st.error)}.</div>`            // no es un fallo: solo falta la clave de TopDeck
+      : `<div class="banner">Error al actualizar: ${esc(st.error)}</div>`) : '');
   F.meta = st.metaWinRate ?? 0.25;
   return st;
 }
@@ -347,6 +349,260 @@ function bindFilters() {
     $('#fmin').value = a === '0' ? '' : a; $('#fmax').value = c === '0' ? '' : c;
     apply();
   });
+}
+
+// ---- Preparar mesa ----
+async function bindTableTool() {
+  const box = $('#tb-pick');
+  await ensureCommanders();
+  const opts = (selected) => commanders.map(c => `<option value="${esc(c.commander)}" ${c.commander === selected ? 'selected' : ''}>${esc(cmdLabel(c.commander))} (${c.decks})</option>`).join('');
+  const saved = JSON.parse(store.get('mesa') || '{}');
+  box.innerHTML = `
+    <label>Tu comandante <select id="tb-me">${opts(saved.me)}</select></label>
+    ${[1, 2, 3].map(i => `<label>Rival ${i}${i > 1 ? ' (opcional)' : ''} <select id="tb-r${i}"><option value="">—</option>${opts(saved['r' + i])}</select></label>`).join('')}
+    <button class="primary" id="tb-go">Preparar mesa</button>`;
+  $('#tb-go').onclick = runTable;
+  if (saved.me && saved.r1) runTable();
+}
+
+async function runTable() {
+  const out = $('#tb-out');
+  const me = $('#tb-me').value, rs = [1, 2, 3].map(i => $('#tb-r' + i).value);
+  if (!rs[0]) { out.innerHTML = '<div class="panel muted">Elige al menos un rival.</div>'; return; }
+  store.set('mesa', JSON.stringify({ me, r1: rs[0], r2: rs[1], r3: rs[2] }));
+  out.innerHTML = '<div class="panel muted">Calculando…</div>';
+  try {
+    const r = await api(`/api/table?me=${encodeURIComponent(me)}${rs.map((x, i) => x ? `&r${i + 1}=${encodeURIComponent(x)}` : '').join('')}`);
+    const tone2 = x => x.z == null ? 'muted' : x.z >= 2 ? 'pos-t' : x.z <= -2 ? 'neg-t' : 'muted';
+    const cell = (x, label) => !x.pods ? '<span class="muted">sin mesas</span>' : x.enough ? `${pct(x.winRate)}` : `<span class="muted" title="Menos de ${r.minPods} mesas">${pct(x.winRate)} · pocas</span>`;
+    const rows = r.rows.map(x => `<tr><td>${cmdBtn(x.rival)}</td><td class="n">${x.pods}</td><td class="n">${cell(x)}</td><td class="n muted">${x.winRateWithout == null ? '—' : pct(x.winRateWithout)}</td>
+      <td class="n ${tone2(x)}">${x.enough ? pp(x.lift) : '—'}</td><td class="n muted">${x.enough ? x.z.toFixed(1) : 'muestra insuficiente'}</td></tr>`).join('');
+    const multi = r.any ? `<div style="margin-top:10px">
+        <div>Mesas con <b>alguno</b> de ellos: <b>${r.any.pods}</b> · winrate ${r.any.winRate == null ? '—' : pct(r.any.winRate)} (sin ninguno: ${r.any.winRateWithout == null ? '—' : pct(r.any.winRateWithout)})</div>
+        <div>Mesas con <b>todos a la vez</b>: <b>${r.all.pods}</b>${r.all.enough ? ` · winrate ${pct(r.all.winRate)}` : ` <span class="muted">(muy pocas para concluir nada)</span>`}</div></div>` : '';
+    const rivalCards = r.cards.map(c => `
+      <div class="panel"><h2>${cmdBtn(c.rival, cmdLabel(c.rival))} <small class="muted">${c.decks} mazos</small></h2>
+        ${c.distinctive.length ? `<div class="muted" style="margin-bottom:6px">Lo que lo distingue (lo lleva mucho más que el meta en general):</div>
+          <div class="chips">${c.distinctive.map(x => `<span class="chip" data-card="${esc(x.card)}" title="Lo lleva el ${pct(x.inclusion, 0)} de sus mazos frente al ${pct(x.meta, 0)} de todo el meta">${esc(short(x.card, 26))} <small>${pct(x.inclusion, 0)} <span class="muted">vs ${pct(x.meta, 0)}</span></small></span>`).join('')}</div>`
+          : '<div class="muted">No tiene cartas que lo distingan claramente del resto del meta.</div>'}
+        <div class="threats" data-rival="${esc(c.rival)}"><span class="muted">Consultando sus combos…</span></div>
+        <details style="margin-top:8px"><summary class="muted">Sus cartas más jugadas</summary><div class="chips" style="margin-top:6px">${c.top.map(x => `<span class="chip" data-card="${esc(x.card)}">${esc(short(x.card, 26))} <small>${pct(x.inclusion, 0)}</small></span>`).join('')}</div></details>
+      </div>`).join('');
+    out.innerHTML = `
+      <div class="panel">
+        <h2>${cmdBtn(r.me, cmdLabel(r.me))} contra ${r.rows.map(x => esc(cmdLabel(x.rival))).join(', ')}</h2>
+        <div class="muted" style="margin-bottom:8px">${r.pods} mesas de este comandante · winrate general ${pct(r.baseline)}</div>
+        <table><thead><tr><th>Rival en la mesa</th><th class="n">Mesas con él</th><th class="n">Winrate con él</th><th class="n">Sin él</th><th class="n">Diferencia</th><th class="n">z</th></tr></thead><tbody>${rows}</tbody></table>
+        ${multi}
+        <div class="note">Los matchups en cEDH suelen ser <b>casi planos</b>: un z cerca de 0 significa que no se distingue de jugar sin ese rival (solo se colorea con |z| ≥ 2). Es histórico, no una predicción: las mesas de un mismo torneo no son independientes y cambiar de rival cambia también a quién más te sientas. ${F.dec ? 'Solo mesas con ganador y rivales conocidos.' : 'Los empates cuentan como mesa no ganada.'}</div>
+      </div>
+      ${r.shared.length ? `<div class="panel"><h2>Cartas que verás casi seguro</h2>
+        <div class="muted" style="margin-bottom:6px">Las llevan al menos el 60 % de los mazos de dos o más de tus rivales y no las juega todo el meta.</div>
+        <div class="chips">${r.shared.map(x => `<span class="chip" data-card="${esc(x.card)}" title="La llevan ${x.rivals} de tus rivales; en todo el meta, el ${pct(x.meta, 0)}">${esc(short(x.card, 26))} <small>${x.rivals}/${r.rows.length}</small></span>`).join('')}</div></div>` : ''}
+      <div class="cols wide">${rivalCards}</div>`;
+    out.querySelectorAll('.threats').forEach(el => loadThreats(el));
+  } catch (e) { out.innerHTML = `<div class="panel muted">${esc(e.message)}</div>`; }
+}
+
+// Amenazas de un rival: sus líneas de combo más jugadas y las piezas clave (el detalle está en la ficha del comandante)
+async function loadThreats(el) {
+  try {
+    // Las cartas por función no dependen de Spellbook: salen enseguida aunque su servicio tarde o falle
+    const th = await api(`/api/threats?name=${encodeURIComponent(el.dataset.rival)}`).catch(() => null);
+    const top = id => th ? (th.categories.find(c => c.id === id) || { cards: [] }).cards.filter(c => c.inclusion >= 0.4).slice(0, 4) : [];
+    const brief = [['Remates', 'finishers'], ['Esperar interacción', 'interaction']].map(([label, id]) => top(id).length
+      ? `<div class="muted" style="margin-top:4px">${label}: ${top(id).map(c => `${cardBtn(c.card)} (${pct(c.inclusion, 0)})`).join(' · ')}</div>` : '').join('');
+    el.innerHTML = `<h4 style="margin:12px 0 6px;font-size:13px">De qué preocuparse</h4>${brief}<div class="muted" style="margin-top:6px">Consultando sus combos…</div>`;
+    const r = await api(`/api/combos?name=${encodeURIComponent(el.dataset.rival)}`, { days: F.days });
+    const lines = [...r.lines.filter(l => l.kind === 'win'), ...r.lines.filter(l => l.kind !== 'win' && l.usage < 0.9)].slice(0, 3);
+    el.innerHTML = `<h4 style="margin:12px 0 6px;font-size:13px">De qué preocuparse</h4>${brief}
+      <div class="muted" style="margin-top:8px">Líneas de combo:</div>
+      ${lines.length ? lines.map(l => `<div class="tline k-${l.kind}"><span class="tl-k">${cardBtn(l.key)}</span> <b>${pct(l.usage, 0)}</b>
+        <span class="muted">${l.kind === 'win' ? 'gana la partida' : 'motor'} · ${esc(l.effects.slice(0, 2).map(e => e.name).join(', '))}</span></div>`).join('')
+        : '<div class="muted">No se detectan líneas de combo claras.</div>'}
+      ${r.keyPieces.length ? `<div class="muted" style="margin-top:6px">Piezas clave: ${r.keyPieces.slice(0, 3).map(k => `${cardBtn(k.card)} (${pct(k.usage, 0)})`).join(' · ')}</div>` : ''}`;
+  } catch (e) {
+    el.querySelectorAll('.muted').forEach(m => { if (/Consultando sus combos/.test(m.textContent)) m.remove(); });
+    el.insertAdjacentHTML('beforeend', `<div class="muted" style="margin-top:8px">Combos no disponibles ahora: ${esc(e.message)}</div>`);
+  }
+}
+
+// ---- Abrir un comandante o buscar una carta desde cualquier tabla (elementos con data-open-cmd / data-open-card) ----
+document.addEventListener('click', async e => {
+  const el = e.target.closest('[data-open-cmd],[data-open-card]');
+  if (!el) return;
+  if (el.dataset.openCmd) { view = { t: 'cmd', name: el.dataset.openCmd, minWith: 5 }; openCommander(el.dataset.openCmd); return; }
+  await ensureCommanders();
+  view = { t: 'list', tab: 'cartas', card: el.dataset.openCard };
+  renderList();
+});
+// Etiqueta corta de un comandante: con pareja, solo los nombres de pila («Rograkh + Thrasios»); si no, el nombre recortado
+const cmdLabel = name => name.includes(' / ') ? name.split(' / ').map(p => p.split(',')[0]).join(' + ') : short(name, 34);
+const cmdBtn = (name, label) => `<button type="button" class="linklike" data-open-cmd="${esc(name)}" data-card="${esc(name)}" title="${esc(name)}">${esc(label ?? cmdLabel(name))}</button>`;
+const cardBtn = name => `<button type="button" class="linklike" data-open-card="${esc(name)}" data-card="${esc(name)}">${esc(name)}</button>`;
+const dayMonth = t => new Date(t).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' });
+
+// ---- Cartas a tener en cuenta (remates, interacción, tutores, maná rápido y odio) ----
+async function loadThreatCards(name) {
+  const box = $('#th');
+  try {
+    const r = await api(`/api/threats?name=${encodeURIComponent(name)}`);
+    const chip = c => `<span class="chip" data-card="${esc(c.card)}" title="Lo lleva el ${pct(c.inclusion, 0)} de sus mazos; en todo el meta, el ${pct(c.meta, 0)}">${esc(short(c.card, 26))} <small>${pct(c.inclusion, 0)}</small></span>`;
+    box.className = 'muted-reset';
+    box.innerHTML = `
+      ${r.defining.length ? `<h3 class="sec">Lo que define a este mazo</h3><div class="muted" style="margin-bottom:6px">Cartas que lleva mucho más que el meta en general (el número es su porcentaje de mazos).</div>
+        <div class="chips">${r.defining.map(chip).join('')}</div>` : ''}
+      ${r.categories.map(cat => {
+        const more = cat.avg - cat.metaAvg;
+        return `<h3 class="sec">${esc(cat.label)} <small class="muted">· de media ${cat.avg.toFixed(1)} por mazo (meta: ${cat.metaAvg.toFixed(1)})${Math.abs(more) >= 1 ? (more > 0 ? ' <b>más que el meta</b>' : ' <b>menos que el meta</b>') : ''}</small></h3>
+          <div class="muted" style="margin-bottom:6px">${esc(cat.hint)}</div>
+          ${cat.cards.length ? `<div class="chips">${cat.cards.map(chip).join('')}</div>` : '<div class="muted">Casi ninguna de estas cartas aparece en sus mazos.</div>'}`;
+      }).join('')}
+      <div class="note">Las listas por función son de criterio (no salen de los datos) y se pueden editar en <code>lib/threats.js</code>; el porcentaje sí sale de los ${r.decks} mazos de este comandante. Mana Crypt, Jeweled Lotus y Dockside Extortionist están prohibidas en Commander y no figuran.</div>`;
+  } catch (e) { box.className = 'muted'; box.textContent = e.message; }
+}
+
+// ---- Combos y amenazas (datos de Commander Spellbook cruzados con nuestros mazos) ----
+const effChip = e => `<span class="eff ${e.terminal ? 'win' : ''}" title="${e.terminal ? 'Gana la partida' : e.status === 'S' ? 'Efecto autónomo' : 'Efecto auxiliar'}">${esc(e.name)}</span>`;
+function lineHtml(l) {
+  const kindTag = { win: 'Gana la partida', engine: 'Motor: necesita un remate', helper: 'Auxiliar' }[l.kind];
+  return `<div class="line k-${l.kind}">
+    <div class="lh"><span class="lk">${cardBtn(l.key)}</span>
+      <div class="wr" style="min-width:150px"><b>${pct(l.usage, 0)}</b><div class="bar" style="flex:1"><i class="pos" style="left:0;width:${l.usage * 100}%"></i></div></div>
+      <span class="tag" title="Combos distintos que usan esta pieza como pieza clave">${l.combos} ${l.combos === 1 ? 'combo' : 'combos'}</span></div>
+    <div class="muted" style="font-size:12.5px">${kindTag} · lo pueden hacer el ${pct(l.usage, 0)} de los mazos</div>
+    <div class="effs">${l.effects.map(effChip).join('')}</div>
+    ${l.enablers.length ? `<div class="muted" style="margin-top:6px">Con: ${l.enablers.map(e => cardBtn(e.card)).join(' · ')}</div>` : ''}
+    <details style="margin-top:6px"><summary class="muted">Cómo funciona</summary>
+      ${l.best.map(b => `<div class="combo"><div class="chips">${b.cards.map(c => `<span class="chip" data-card="${esc(c)}">${esc(short(c, 26))}</span>`).join('')}</div>
+        <div class="muted" style="margin:4px 0">Lo juega el ${pct(b.usage, 0)} de los mazos · <a href="${esc(b.url)}" target="_blank" rel="noopener">ver en Commander Spellbook</a></div>
+        ${b.prerequisites ? `<div class="muted" style="font-size:12.5px"><b>Requisitos:</b> ${esc(b.prerequisites).replace(/\n/g, '<br>')}</div>` : ''}
+        ${b.steps ? `<pre class="steps">${esc(b.steps)}</pre>` : ''}</div>`).join('')}
+    </details></div>`;
+}
+async function loadCombos(name) {
+  const box = $('#cb');
+  try {
+    const r = await api(`/api/combos?name=${encodeURIComponent(name)}`, { days: F.days });
+    const wins = r.lines.filter(l => l.kind === 'win');
+    const rest = r.lines.filter(l => l.kind !== 'win');
+    const base = rest.filter(l => l.usage >= 0.9), engines = rest.filter(l => l.usage < 0.9);
+    box.className = 'muted-reset';
+    box.innerHTML = `
+      <div><b>${r.shown}</b> de los ${r.totalCombos} combos que encajan con las cartas de este comandante se juegan en torneos cEDH; el <b>${pct(r.coverage, 0)}</b> de los ${r.decks} mazos tiene al menos uno.</div>
+      <h2 style="margin-top:18px">Líneas que ganan la partida</h2>
+      ${wins.length ? wins.map(lineHtml).join('') : '<div class="muted">Ningún combo de victoria directa se juega con frecuencia: este comandante suele ganar con un motor y un remate (mira los motores).</div>'}
+      <h2 style="margin-top:18px">Motores <small class="muted">(infinitos que necesitan un remate)</small></h2>
+      ${engines.length ? engines.map(lineHtml).join('') : '<div class="muted">Sin motores destacados.</div>'}
+      ${base.length ? `<details style="margin-top:14px"><summary><b>Lo que casi todos los mazos hacen</b> <span class="muted">(${base.length}; 90 % o más)</span></summary>${base.map(lineHtml).join('')}</details>` : ''}
+      <h2 style="margin-top:18px">Piezas clave: de qué preocuparse</h2>
+      ${r.keyPieces.length ? `<table><thead><tr><th>Carta</th><th class="n" title="% de mazos que dependen de ella para algún combo jugado">Mazos que la usan en un combo</th></tr></thead><tbody>${r.keyPieces.map(k => `<tr><td>${cardBtn(k.card)}</td><td class="n">${pct(k.usage, 0)}</td></tr>`).join('')}</tbody></table>
+        <div class="note">Si te enfrentas a este comandante, son las piezas cuya carta (o su respuesta) más líneas de combo condiciona. Se excluyen las cartas que juega casi todo el meta (Sol Ring, Mana Vault…).</div>` : '<div class="muted">Sin piezas destacadas.</div>'}
+      <div class="note">Combos de <a href="https://commanderspellbook.com" target="_blank" rel="noopener">Commander Spellbook</a>, cruzados con los mazos de TopDeck. Solo se consultan las cartas que este comandante juega en al menos el 10 % de sus mazos; recoge combos infinitos y de victoria, <b>no remates por valor ni victorias sin combo</b>, así que «sin combo detectado» no significa inofensivo. Los nombres de los efectos están en inglés, como en su web.${r.stale ? ' <b>Datos guardados:</b> Spellbook no responde ahora.' : ''}</div>`;
+  } catch (e) { box.className = 'muted'; box.textContent = e.message; }
+}
+
+// ---- Meta del momento ----
+const TIERS = {
+  S: 'Claramente por encima de la media', A: 'Por encima de la media', B: 'En la media o sin datos claros',
+  C: 'Por debajo de la media', D: 'Claramente por debajo de la media',
+};
+const PALETTE = ['#b4532a', '#2f7d4f', '#3b6ea8', '#c28b1e', '#7a4fa3', '#2a8f8f', '#b3372f', '#6b8e23'];
+async function loadMeta() {
+  const box = $('#meta');
+  try {
+    const r = await api('/api/meta');
+    if (!r.commanders.length) { box.textContent = 'Sin datos suficientes con el periodo y filtros actuales.'; return; }
+    const top = r.commanders.slice(0, 8), n = r.buckets.length, H = 190;
+    const col = i => {            // i = 0 más antiguo … n-1 más reciente
+      const segs = top.map(c => c.series[i]), other = Math.max(0, 1 - segs.reduce((a, b) => a + b, 0));
+      return { segs, other };
+    };
+    const stack = r.buckets.map((b, i) => {
+      const { segs, other } = col(i);
+      return `<div class="stackcol"><div class="stackbar" role="img" aria-label="Periodo hasta ${dayMonth(b.end)}">
+        <i style="height:${other * H}px;background:var(--line)" title="Otros: ${pct(other)}"></i>
+        ${segs.map((v, k) => `<i style="height:${v * H}px;background:${PALETTE[k]}" title="${esc(top[k].commander)}: ${pct(v)}"></i>`).reverse().join('')}
+        </div><small>${dayMonth(b.end)}</small></div>`;
+    }).join('');
+    const legend = top.map((c, k) => `<span title="${esc(c.commander)}"><i style="background:${PALETTE[k]}"></i>${esc(cmdLabel(c.commander))} <small>${pct(c.share, 0)}</small></span>`).join('') + `<span><i style="background:var(--line)"></i>Otros</span>`;
+    const by = {}; for (const c of r.commanders) (by[c.tier] = by[c.tier] || []).push(c);
+    const tiers = Object.keys(TIERS).filter(t => by[t]).map(t => `
+      <div class="tier t${t}"><div class="tl"><b>${t}</b><small>${TIERS[t]}</small></div>
+        <div class="tc">${by[t].map(c => `<span class="tchip">${cmdBtn(c.commander)} <small>${pct(c.winRate)} · ${c.decks} mazos</small></span>`).join('')}</div></div>`).join('');
+    const movers = [...r.commanders].sort((a, b) => b.change - a.change);
+    const mv = list => list.map(c => `<tr><td>${cmdBtn(c.commander)}</td><td class="n">${pct(c.series[n - 1], 1)}</td><td class="n ${c.change >= 0 ? 'pos-t' : 'neg-t'}">${pp(c.change)}</td></tr>`).join('');
+    const draws = [...r.commanders].sort((a, b) => b.drawRate - a.drawRate);
+    const maxDraw = Math.max(0.01, ...r.buckets.map(b => b.drawRate || 0));
+    const dr = list => list.map(c => `<tr><td>${cmdBtn(c.commander)}</td><td class="n">${pct(c.drawRate, 0)}</td></tr>`).join('');
+    box.className = 'muted-reset';
+    box.innerHTML = `
+      <div>Meta de los últimos días elegidos: <b>${r.decksInPeriod}</b> mazos cEDH · winrate medio <b>${pct(r.mean)}</b> ${F.dec ? '(solo partidas con ganador)' : '(empates como no ganadas)'}.</div>
+
+      <h2 style="margin-top:18px">Presencia en el meta, mes a mes</h2>
+      <div class="stack">${stack}</div>
+      <div class="legend" style="margin-top:8px">${legend}</div>
+      <div class="note">Cada barra es un periodo de 30 días (etiquetado con su fecha final) y su altura reparte el 100 % de los mazos de ese periodo entre los ocho comandantes más jugados y el resto.</div>
+
+      <h2 style="margin-top:20px">Niveles por resultados</h2>
+      <div class="tiers">${tiers}</div>
+      <div class="note">El nivel sale del <b>intervalo de confianza del winrate</b> frente a la media del meta (${pct(r.mean)}): S y D solo si el intervalo queda a más de 2 puntos de la media; A y C si queda entero por encima o por debajo; B si no se distingue de la media (poca muestra o rendimiento medio). Solo entran los comandantes con ${r.minDecks} mazos o más. <b>Es una descripción de resultados, no de la fuerza del mazo</b>: el winrate refleja también al jugador y al plan.</div>
+
+      <div class="cols wide" style="margin-top:20px">
+        <div><h2>Suben en presencia</h2><table><thead><tr><th>Comandante</th><th class="n">Ahora</th><th class="n" title="Último periodo frente a la media de los dos anteriores">Cambio</th></tr></thead><tbody>${mv(movers.slice(0, 5))}</tbody></table></div>
+        <div><h2>Bajan en presencia</h2><table><thead><tr><th>Comandante</th><th class="n">Ahora</th><th class="n" title="Último periodo frente a la media de los dos anteriores">Cambio</th></tr></thead><tbody>${mv(movers.slice(-5).reverse())}</tbody></table></div>
+      </div>
+
+      <h2 style="margin-top:20px">Empates</h2>
+      <div class="spark">${r.buckets.map(b => `<div class="sb" title="${b.decks} mazos"><small>${b.drawRate == null ? '—' : pct(b.drawRate, 1)}</small>
+        <i style="height:${b.drawRate == null ? 0 : Math.max(2, b.drawRate / maxDraw * 60)}px"></i><small class="d">${dayMonth(b.end)}</small></div>`).join('')}</div>
+      <div class="note" style="margin-bottom:10px">Porcentaje de partidas que acaban en empate, por periodos de 30 días. La tasa de empates es una característica estable de cada comandante.</div>
+      <div class="cols wide">
+        <div><h2>Más empates</h2><table><thead><tr><th>Comandante</th><th class="n">Empates</th></tr></thead><tbody>${dr(draws.slice(0, 6))}</tbody></table></div>
+        <div><h2>Menos empates</h2><table><thead><tr><th>Comandante</th><th class="n">Empates</th></tr></thead><tbody>${dr(draws.slice(-6).reverse())}</tbody></table></div>
+      </div>`;
+  } catch (e) { box.textContent = e.message; }
+}
+
+// ---- Novedades del meta ----
+async function loadNovelties() {
+  const box = $('#nov');
+  try {
+    const r = await api('/api/novelties');
+    if (r.tooFew) { box.textContent = 'Hacen falta más mazos recientes para detectar novedades con los filtros actuales.'; return; }
+    const where = c => c.commanders.map(x => cmdBtn(x.commander)).join(' · ');
+    const table = (rows, empty, extra) => rows.length ? `<table><thead><tr><th>Carta</th><th class="n" title="% de mazos que la llevaban en los dos meses anteriores">Antes</th><th class="n">Último mes</th><th class="n">Cambio</th><th>Dónde se juega más</th></tr></thead>
+      <tbody>${rows.map(c => `<tr><td>${cardBtn(c.card)}${extra ? extra(c) : ''}</td><td class="n muted">${pct(c.base, 0)}</td><td class="n">${pct(c.recent, 0)}</td>
+        <td class="n ${c.change >= 0 ? 'pos-t' : 'neg-t'}">${pp(c.change)}</td><td>${where(c)}</td></tr>`).join('')}</tbody></table>` : `<div class="muted">${empty}</div>`;
+    box.className = 'muted-reset';
+    box.innerHTML = `
+      <div>Se compara el <b>último mes</b> (${r.recentDecks} mazos) con los <b>dos meses anteriores</b> (${r.baseDecks} mazos). Pulsa una carta para ver su ficha.</div>
+      <h2 style="margin-top:16px">Cartas nuevas en el meta</h2>
+      ${table(r.fresh, 'No hay cartas que hayan aparecido en los datos hace poco con uso apreciable.', c => ` <span class="tag" title="Primera vez en los datos: ${new Date(c.firstSeen).toLocaleDateString('es-ES')}">nueva</span>`)}
+      <div class="cols wide" style="margin-top:18px">
+        <div><h2>En ascenso</h2>${table(r.rising, 'Ninguna carta sube de forma clara.')}</div>
+        <div><h2>En descenso</h2>${table(r.falling, 'Ninguna carta baja de forma clara.')}</div>
+      </div>
+      <div class="note">Un cambio solo cuenta si es de al menos 2 puntos y estadísticamente claro (z ≥ 3), para que no se cuele el ruido. Solo describe qué se juega, <b>no si la carta funciona mejor o peor</b>. «Nueva» significa que no aparece en los datos hasta hace poco (por ejemplo, una edición recién publicada).</div>`;
+  } catch (e) { box.textContent = e.message; }
+}
+
+// ---- Alternativas a una carta (dentro del buscador) ----
+async function loadAlternatives(card, commander) {
+  const out = $('#alt-out');
+  out.innerHTML = '<span class="muted">Calculando…</span>';
+  try {
+    const r = await api(`/api/card-alternatives?name=${encodeURIComponent(card)}&commander=${encodeURIComponent(commander)}`);
+    if (r.tooFew) {
+      out.innerHTML = `<div class="muted">No hay mazos parecidos sin ${esc(card)} con los que comparar (${r.withoutCard} sin ella, ${r.similar ?? 0} parecidos): los que no la llevan juegan otra versión del mazo.</div>`;
+      return;
+    }
+    out.innerHTML = `<div class="muted" style="margin-bottom:8px">Se comparan los <b>${r.withCard}</b> mazos que la llevan con los <b>${r.similar}</b> mazos que no la llevan pero se parecen a ellos (de ${r.withoutCard} sin ella).</div>
+      ${r.alternatives.length ? `<table><thead><tr><th>Carta</th><th class="n" title="% de los mazos parecidos sin la carta que la llevan">Sin ${esc(short(card, 18))}</th><th class="n">Con ella</th></tr></thead>
+      <tbody>${r.alternatives.map(a => `<tr><td>${cardBtn(a.card)}</td><td class="n">${pct(a.withoutCard, 0)}</td><td class="n muted">${pct(a.withCard, 0)}</td></tr>`).join('')}</tbody></table>`
+      : '<div class="muted">Ninguna carta destaca como alternativa clara.</div>'}
+      <div class="note">Es lo que juegan <b>en su lugar</b> los mazos parecidos, no una prueba de que sean equivalentes. A veces reflejan otra versión del mazo.</div>`;
+  } catch (e) { out.innerHTML = `<span class="muted">${esc(e.message)}</span>`; }
 }
 
 // ---- Buscador de cartas ----
@@ -414,6 +670,16 @@ async function searchCard(name) {
           <tbody>${r.together.map(c => `<tr><td>${cn(c.card)}</td><td class="n">${pct(c.withCard, 0)}</td><td class="n muted">${pct(c.overall, 0)}</td></tr>`).join('')}</tbody></table>`
           : '<div class="muted">No hay cartas que la acompañen de forma destacada.</div>'}</div>
       </div>`;
+    // Alternativas: solo si hay comandantes donde la carta no la lleven todos
+    const eligible = r.commanders.filter(c => c.decks >= 25 && c.of - c.decks >= 25).slice(0, 10);
+    out.insertAdjacentHTML('beforeend', `<div class="panel"><h2>¿Qué juegan en su lugar?</h2>${eligible.length
+      ? `<label class="muted">Comandante: <select id="alt-cmd" style="width:auto">${eligible.map(c => `<option value="${esc(c.commander)}">${esc(short(c.commander, 46))} (${c.of - c.decks} mazos sin ella)</option>`).join('')}</select></label>
+         <div id="alt-out" style="margin-top:10px"></div>`
+      : '<div class="muted">En los comandantes que la juegan casi todos los mazos la llevan: no hay otros mazos con los que comparar.</div>'}</div>`);
+    if (eligible.length) {
+      $('#alt-cmd').onchange = e => loadAlternatives(r.card, e.target.value);
+      loadAlternatives(r.card, eligible[0].commander);
+    }
     const tb = out.querySelector('tbody');
     if (tb) {
       const open = e => { const tr = e.target.closest('tr[data-c]'); if (tr) { view = { t: 'cmd', name: tr.dataset.c, minWith: 5 }; openCommander(tr.dataset.c); } };
@@ -441,6 +707,15 @@ function renderList() {
       </tr></thead><tbody id="rows"></tbody></table>
       <div class="note">La referencia es la <b>media del meta</b> en el periodo elegido (${pct(F.meta)}). ${drawNote()} Verde o rojo solo si el intervalo de confianza al 95 % queda entero por encima o por debajo de la media; en <b>gris</b> no se distingue de ella (suele ser falta de partidas). Se cuentan las partidas suizas y las eliminatorias.</div>
     </div>`) +
+    tabPanel('meta', active, `<div id="meta" class="panel muted">Calculando…</div>`) +
+    tabPanel('novedades', active, `<div id="nov" class="panel muted">Calculando…</div>`) +
+    tabPanel('mesa', active, `
+    <div class="panel">
+      <h2>Preparar una mesa</h2>
+      <div class="muted" style="margin-bottom:10px">Elige tu comandante y hasta tres rivales que esperas. Verás cómo le ha ido a tu comandante en las mesas donde estaban y qué cartas distinguen a esos mazos.</div>
+      <div class="tablepick" id="tb-pick"><span class="muted">Cargando comandantes…</span></div>
+    </div>
+    <div id="tb-out"></div>`) +
     tabPanel('cartas', active, `
     <div class="panel">
       <h2>Buscar una carta</h2>
@@ -478,7 +753,7 @@ function renderList() {
   const open = e => { const tr = e.target.closest('tr'); if (tr) { view.tab = undefined; openCommander(tr.dataset.c); } };
   $('#rows').onclick = open;
   $('#rows').onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(e); } };
-  bindTabs('list', { cartas: bindCardSearch, matriz: loadMatrix, fiabilidad: loadValidation });
+  bindTabs('list', { meta: loadMeta, novedades: loadNovelties, mesa: bindTableTool, cartas: bindCardSearch, matriz: loadMatrix, fiabilidad: loadValidation });
 }
 
 async function openCommander(name, minWith = 5) {
@@ -583,6 +858,15 @@ async function openCommander(name, minWith = 5) {
         <h2>Paquetes y alternativas</h2>
         <div id="syn" class="muted">Calculando…</div>
       </div>`)}
+    ${tabPanel('combos', active, `
+      <div class="panel">
+        <h2>Cartas a tener en cuenta</h2>
+        <div id="th" class="muted">Calculando…</div>
+      </div>
+      <div class="panel">
+        <h2>Combos y amenazas</h2>
+        <div id="cb" class="muted">Consultando Commander Spellbook (la primera vez puede tardar unos segundos)…</div>
+      </div>`)}
     ${tabPanel('lista', active, `
       <div class="panel">
         <h2>Mi lista</h2>
@@ -619,6 +903,7 @@ async function openCommander(name, minWith = 5) {
     matchups: () => loadMatchups(name),
     evolucion: () => loadTrend(name),
     variantes: () => { loadVariants(name, 3); loadPackages(name); },
+    combos: () => { loadThreatCards(name); loadCombos(name); },
   });
 }
 
@@ -678,11 +963,25 @@ async function loadTrend(name) {
 }
 
 // Variantes: mazos agrupados automáticamente por las cartas que los diferencian.
+// Núcleo y huecos de decisión de una variante (solo uso, no resultados)
+function coreHtml(d) {
+  if (!d) return '';
+  const chip = c => `<span class="chip" data-card="${esc(c.card)}">${esc(short(c.card, 26))} <small>${pct(c.p, 0)}</small></span>`;
+  return `<details class="coredet"><summary><b>Núcleo y huecos de decisión</b> <span class="muted">· ${d.core.length} cartas fijas, ≈${d.openSlots} plazas abiertas</span></summary>
+    <div class="note" style="margin-top:6px">De las ≈${Math.round(d.avgCards)} cartas de cada mazo (sin tierras básicas), <b>${d.core.length}</b> las lleva casi todo el mundo (80 % o más). Quedan <b>≈${d.openSlots} plazas abiertas</b> que se reparten entre <b>${d.flexCount}</b> cartas candidatas (20-80 %) y ${d.techCount} de uso minoritario.</div>
+    <h4>Huecos de decisión <small class="muted">(las que más se reparten, primero)</small></h4>
+    <div class="chips">${d.flex.slice(0, 40).map(chip).join('')}</div>
+    <h4>Núcleo <button class="ghost" data-copy-core="${esc(d.core.map(c => c.card).join('\n'))}" title="Copia las cartas del núcleo como lista">Copiar núcleo</button></h4>
+    <div class="chips">${d.core.map(chip).join('')}</div>
+    ${d.tech.length ? `<h4>Tech minoritario <small class="muted">(5-20 %)</small></h4><div class="chips">${d.tech.slice(0, 20).map(chip).join('')}</div>` : ''}
+  </details>`;
+}
+
 async function loadVariants(name, k) {
   const box = $('#variants');
   box.textContent = 'Calculando…';
   try {
-    const v = await api(`/api/variants?name=${encodeURIComponent(name)}&k=${k}`);
+    const v = await api(`/api/variants?name=${encodeURIComponent(name)}&k=${k}&detail=1`);
     if (v.tooFew || !v.variants.length) { box.textContent = 'Hacen falta al menos 40 mazos con este comandante (en el periodo y filtro actuales) para separar variantes.'; return; }
     box.innerHTML = `<div class="variants">${v.variants.map((x, i) => `
       <div class="variant">
@@ -690,9 +989,11 @@ async function loadVariants(name, k) {
         <div class="muted">${x.decks} mazos (${pct(x.share, 0)} del total) · empates ${pct(x.drawRate)}</div>
         <div class="wr" style="margin-top:8px"><b>${pct(x.winRate)}</b>${track(x.winRate - v.baseline, .10, !sig(x.ci, v.baseline))}</div>
         <div class="muted" style="font-size:12px">IC 95 %: ${pct(x.ci[0])}–${pct(x.ci[1])} · ${pp(x.winRate - v.winRate)} frente a la media del comandante</div>
+        ${coreHtml(x.detail)}
         <div class="chips">${x.signature.map(c => `<span class="chip" data-card="${esc(c.card)}" title="Juegan la carta ${pct(c.inVariant, 0)} de esta variante frente a ${pct(c.inRest, 0)} del resto">${esc(short(c.card, 26))} <small>${pct(c.inVariant, 0)} vs ${pct(c.inRest, 0)}</small></span>`).join('')}</div>
       </div>`).join('')}</div>
       <div class="note">Los mazos se agrupan solos según qué cartas comparten (${v.features} cartas que no juega todo el mundo). Las etiquetas muestran las cartas más características de cada grupo, con el % de mazos del grupo que la juegan frente al resto. Cambia el número de grupos para afinar. Un grupo con menos winrate no es necesariamente peor construido: también puede reunir a jugadores con menos experiencia.</div>`;
+    box.querySelectorAll('[data-copy-core]').forEach(b => { b.onclick = e => { e.preventDefault(); copyText(b.dataset.copyCore.split('\n').map(c => '1 ' + c).join('\n'), b); }; });
   } catch (e) { box.textContent = e.message; }
 }
 
