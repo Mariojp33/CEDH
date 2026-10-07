@@ -1,12 +1,14 @@
 'use strict';
 // Servidor sin dependencias: descarga torneos de TopDeck.gg, los cachea y sirve estadísticas por comandante.
 const http = require('node:http');
+const zlib = require('node:zlib');
 const fs = require('node:fs');
 const path = require('node:path');
 const { fetchTournaments } = require('./lib/topdeck');
-const { buildRecords, filterRecords, commanderList, commanderReport, myListReport, trendReport, synergyReport, variantsReport, matchups, matrix, cardsVsOpponent } = require('./lib/stats');
+const { buildRecords, filterRecords, commanderList, classifyTournaments, neighborsReport, commanderReport, metaWinRate, decisive, decisiveSeats, validationReport, myListReport, packagesReport, trendReport, variantsReport, matchups, matrix, cardsVsOpponent } = require('./lib/stats');
 const cache = require('./lib/cache');
 const { parseText } = require('./lib/parse');
+const { buildCardIndex, suggestCards, cardReport } = require('./lib/cardindex');
 const { mockTournaments } = require('./lib/mock');
 
 const PORT = Number(process.env.PORT) || 3000;
@@ -31,7 +33,25 @@ if (!MOCK && !API_KEY) {
 }
 
 // Estado en memoria. Los registros se guardan con `cards` como array para poder serializarlos.
-let state = { records: [], updatedAt: null, refreshing: false, error: null, coveredDays: 0 };
+let state = { records: [], updatedAt: null, refreshing: false, error: null, coveredDays: 0, index: null };
+// Índice carta -> mazos (buscador). Se rehace cada vez que cambian los registros (al cargar y al actualizar).
+function rebuildIndex() { state.index = buildCardIndex(state.records); }
+
+// Solo se conservan los torneos cEDH. Los demás (casuales, precons, presupuesto, brawl…) se descartan al cargar
+// y al descargar; solo se recuerda cuántos mazos tenía cada uno para poder avisar de ello en la web.
+// ALL_TOURNAMENTS=1 los conserva (solo depuración).
+const KEEP_ALL = process.env.ALL_TOURNAMENTS === '1';
+const excluded = new Map(); // tid -> nº de mazos
+function keepCedh(records) {
+  classifyTournaments(records);
+  if (KEEP_ALL) return records;
+  const batch = new Map(), kept = [];
+  for (const r of records) {
+    if (r.comp === false) batch.set(r.tid, (batch.get(r.tid) || 0) + 1); else kept.push(r);
+  }
+  for (const [tid, n] of batch) excluded.set(tid, n);
+  return kept;
+}
 
 // La caché se guarda en formato compacto (lib/cache.js, v4). Se siguen leyendo las v3 anteriores.
 
@@ -41,7 +61,9 @@ function loadCache() {
       const j = JSON.parse(fs.readFileSync(file, 'utf8'));
       const records = cache.decodeAny(j);
       if (!records) { console.log(`Caché ${path.basename(path.dirname(file))}/ de otra versión: se ignora`); continue; }
-      state.records = records;
+      for (const [tid, n] of j.excluded || []) excluded.set(tid, n);
+      state.records = keepCedh(records);
+      rebuildIndex();
       state.updatedAt = j.updatedAt;
       state.coveredDays = j.days || 90; // las cachés anteriores solo guardaban 90 días
       console.log(`Caché cargada${file === SEED_FILE ? ' (copia del repositorio)' : ''}: ${state.records.length} mazos (${j.updatedAt})`);
@@ -54,10 +76,11 @@ function saveCache() {
   fs.mkdirSync(DATA_DIR, { recursive: true });
   // Se escribe a un archivo temporal y se renombra: un corte a mitad no deja la caché a medias.
   const tmp = CACHE_FILE + '.tmp';
-  cache.writeStream(fs, tmp, { updatedAt: state.updatedAt, days: state.coveredDays }, state.records);
+  cache.writeStream(fs, tmp, { updatedAt: state.updatedAt, days: state.coveredDays, excluded: [...excluded] }, state.records);
   fs.renameSync(tmp, CACHE_FILE);
 }
 
+let retryTimer = null;
 async function refresh() {
   if (state.refreshing) return;
   state.refreshing = true;
@@ -68,7 +91,7 @@ async function refresh() {
     const days = firstLoad ? DAYS : cache.refreshDays(state.updatedAt, DAYS);
     // Cada ventana descargada se convierte enseguida en registros compactos y se descarta el resto,
     // para que el pico de memoria sea el de una ventana y no el de todo el histórico.
-    const fresh = [];
+    let fresh = [];
     if (MOCK) fresh.push(...cache.interned(buildRecords(mockTournaments())));
     else {
       await fetchTournaments({
@@ -77,11 +100,13 @@ async function refresh() {
         onProgress: p => console.log(`Descargando ${p.done}/${p.total} ventanas, ${p.tournaments} torneos`),
       });
     }
+    fresh = keepCedh(fresh);
     const freshTids = new Set(fresh.map(r => r.tid));
     const cutoff = Math.floor(Date.now() / 1000) - DAYS * 86400;
     state.records = state.records
       .filter(r => !freshTids.has(r.tid) && (MOCK || r.date >= cutoff))
       .concat(fresh);
+    rebuildIndex();
     state.updatedAt = new Date().toISOString();
     if (firstLoad) state.coveredDays = DAYS;
     state.error = null;
@@ -90,6 +115,8 @@ async function refresh() {
   } catch (e) {
     state.error = e.message;
     console.error('Error al actualizar:', e.message);
+    // Reintento en 10 minutos (si no, la siguiente actualización sería dentro de REFRESH_HOURS)
+    if (!retryTimer) retryTimer = setTimeout(() => { retryTimer = null; refresh(); }, 10 * 60 * 1000).unref();
   } finally {
     state.refreshing = false;
   }
@@ -98,81 +125,158 @@ async function refresh() {
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
 
+const wantsGzip = res => /\bgzip\b/.test(String(res.req && res.req.headers['accept-encoding'] || ''));
+
 function json(res, code, body) {
-  res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'public, max-age=60' });
-  res.end(JSON.stringify(body));
+  const raw = Buffer.from(JSON.stringify(body));
+  const headers = { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'public, max-age=60', Vary: 'Accept-Encoding' };
+  if (raw.length > 1024 && wantsGzip(res)) {
+    headers['Content-Encoding'] = 'gzip';
+    res.writeHead(code, headers);
+    return res.end(zlib.gzipSync(raw)); // las respuestas grandes (la ficha de un comandante pesa cientos de KB) bajan a una fracción
+  }
+  res.writeHead(code, headers);
+  res.end(raw);
 }
 
-const server = http.createServer((req, res) => {
+// Archivos estáticos: se leen una vez (y se comprimen) mientras no cambien en disco.
+const staticCache = new Map();
+function serveStatic(res, file) {
+  const mtime = fs.statSync(file).mtimeMs;
+  let e = staticCache.get(file);
+  if (!e || e.mtime !== mtime) {
+    const raw = fs.readFileSync(file);
+    e = { mtime, raw, gz: /\.(html|js|css|svg)$/.test(file) ? zlib.gzipSync(raw) : null };
+    staticCache.set(file, e);
+  }
+  const headers = { 'Content-Type': TYPES[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-cache', Vary: 'Accept-Encoding' };
+  if (e.gz && wantsGzip(res)) { headers['Content-Encoding'] = 'gzip'; res.writeHead(200, headers); return res.end(e.gz); }
+  res.writeHead(200, headers); res.end(e.raw);
+}
+
+// Los cálculos pesados (sinergias, variantes, matchups…) se guardan hasta la siguiente actualización de datos.
+const memo = new Map();
+let memoStamp = null;
+const seatCache = { stamp: null, map: new Map() };
+const MEMO_PATHS = new Set(['/api/card', '/api/packages', '/api/variants', '/api/trend', '/api/matchups', '/api/matrix', '/api/cards-vs', '/api/validation']);
+
+const handle = (req, res) => {
   const url = new URL(req.url, 'http://x');
+  const memoKey = MEMO_PATHS.has(url.pathname) ? req.url : null;
+  if (memoKey) {
+    if (memoStamp !== state.updatedAt) { memo.clear(); memoStamp = state.updatedAt; }
+    const hit = memo.get(memoKey);
+    if (hit) return json(res, hit.code, hit.body);
+  }
+  // Responde y, si el endpoint es de los pesados, guarda el resultado
+  const send = (code, body) => { if (memoKey) { if (memo.size > 400) memo.clear(); memo.set(memoKey, { code, body }); } return json(res, code, body); };
   // Filtro opcional por jugadores del torneo, común a todos los endpoints de estadísticas.
   const minPlayers = Math.max(0, parseInt(url.searchParams.get('minPlayers'), 10) || 0);
   const maxPlayers = Math.max(0, parseInt(url.searchParams.get('maxPlayers'), 10) || 0);
   // Periodo: solo últimos N días (1, 3 o 6 meses en la web); 0 = todo lo descargado.
   const days = Math.min(DAYS, Math.max(0, parseInt(url.searchParams.get('days'), 10) || 0));
   const records = filterRecords(state.records, { minPlayers, maxPlayers, days });
+  // dec=1: «solo partidas con ganador» (los empates salen del denominador). Afecta a todo: winrates, cartas,
+  // sinergias, variantes, tendencia, validación y también matchups y matriz (solo mesas con ganador y rivales conocidos).
+  const dec = url.searchParams.get('dec') === '1';
+  // Para matchups y matriz: con dec=1, solo mesas con ganador y rivales conocidos
+  const seatRecords = () => {
+    if (!dec) return records;
+    // Reconstruir los asientos con ganador cuesta ~150 ms: se guarda por combinación de filtros hasta la próxima actualización
+    const k = `${state.updatedAt}|${minPlayers}|${maxPlayers}|${days}`;
+    if (seatCache.stamp !== state.updatedAt) { seatCache.map.clear(); seatCache.stamp = state.updatedAt; }
+    if (!seatCache.map.has(k)) { if (seatCache.map.size >= 8) seatCache.map.clear(); seatCache.map.set(k, decisiveSeats(records)); }
+    return seatCache.map.get(k);
+  };
+  const view = dec ? decisive(records) : records;
 
   if (url.pathname === '/api/status') {
     return json(res, 200, {
       mock: MOCK, updatedAt: state.updatedAt, refreshing: state.refreshing, error: state.error,
-      decks: records.length, days: DAYS, coveredDays: state.coveredDays, participantMin: PARTICIPANT_MIN,
+      decks: records.length, days: DAYS, coveredDays: state.coveredDays, metaWinRate: metaWinRate(view), participantMin: PARTICIPANT_MIN,
       tournaments: new Set(records.map(r => r.tid)).size,
+      // torneos descartados por no parecer cEDH (se guardan solo para poder avisar de ello)
+      excluded: { tournaments: excluded.size, decks: [...excluded.values()].reduce((x, y) => x + y, 0) },
     });
   }
   if (url.pathname === '/api/commanders') {
     const min = Math.max(1, Number(url.searchParams.get('min')) || 5);
-    return json(res, 200, commanderList(records, min));
+    return json(res, 200, commanderList(view, min));
   }
   if (url.pathname === '/api/commander') {
     const name = url.searchParams.get('name');
     const minWith = Math.max(2, Number(url.searchParams.get('minWith')) || 5);
-    const rep = name && commanderReport(records, name, { minWith, minWithout: minWith });
+    const rep = name && commanderReport(view, name, { minWith, minWithout: minWith });
     return rep ? json(res, 200, rep) : json(res, 404, { error: 'Comandante no encontrado' });
   }
 
   if (url.pathname === '/api/mylist' && req.method === 'POST') {
     let body = '';
     req.on('data', c => { body += c; if (body.length > 200000) req.destroy(); });
-    req.on('end', () => {
+    req.on('end', () => { try {
       let j; try { j = JSON.parse(body); } catch { return json(res, 400, { error: 'JSON no válido' }); }
       const deck = parseText(String(j.list || ''));
       if (!deck.cards.size || !j.commander) return json(res, 400, { error: 'Pega una lista con al menos una carta' });
-      const rep = myListReport(records, j.commander, new Set(deck.cards.keys()));
+      const names = new Set(deck.cards.keys());
+      const rep = myListReport(view, j.commander, names);
+      if (rep) {
+        // Variante más parecida y listas reales parecidas (solo con datos de TopDeck)
+        const vr = variantsReport(view, j.commander, { k: 3, deckCards: names });
+        rep.variant = vr.yours ? { ...vr.variants[vr.yours.index], ...vr.yours, total: vr.variants.length, baseline: vr.baseline } : null;
+        rep.neighbors = neighborsReport(view, j.commander, names);
+      }
       return rep ? json(res, 200, rep) : json(res, 404, { error: 'Comandante sin datos en este periodo' });
-    });
+    } catch (e) { fail(res, e); } });
     return;
+  }
+  if (url.pathname === '/api/validation') {
+    // Usa todo el histórico (respetando solo el filtro de jugadores).
+    const all = filterRecords(state.records, { minPlayers, maxPlayers });
+    const rep = validationReport(dec ? decisive(all) : all);
+    return rep ? send(200, rep) : send(404, { error: 'Muestra insuficiente para validar' });
   }
   if (url.pathname === '/api/trend') {
     const name = url.searchParams.get('name');
     // La tendencia usa todo el histórico (respetando solo el filtro de jugadores).
-    const rep = name && trendReport(filterRecords(state.records, { minPlayers, maxPlayers }), name);
-    return rep ? json(res, 200, rep) : json(res, 404, { error: 'Comandante sin datos' });
+    const all = filterRecords(state.records, { minPlayers, maxPlayers });
+    const rep = name && trendReport(dec ? decisive(all) : all, name);
+    return rep ? send(200, rep) : send(404, { error: 'Comandante sin datos' });
   }
-  if (url.pathname === '/api/synergy') {
+  if (url.pathname === '/api/cards') {
+    // Sugerencias del buscador de cartas
+    return json(res, 200, state.index ? suggestCards(state.index, url.searchParams.get('q')) : []);
+  }
+  if (url.pathname === '/api/card') {
     const name = url.searchParams.get('name');
-    const rep = name && synergyReport(records, name);
-    return rep ? json(res, 200, rep) : json(res, 404, { error: 'Comandante sin datos' });
+    const rep = name && state.index && cardReport(state.index, state.records, name, { minPlayers, maxPlayers, days });
+    return rep ? send(200, rep) : send(404, { error: 'Carta no encontrada en los mazos de este periodo' });
+  }
+  if (url.pathname === '/api/packages') {
+    // Paquetes (cartas que se juegan juntas) y alternativas (cartas que casi nunca coinciden), dentro de un comandante
+    const name = url.searchParams.get('name');
+    const rep = name && packagesReport(view, name);
+    return rep ? send(200, rep) : send(404, { error: 'Comandante sin datos' });
   }
   if (url.pathname === '/api/variants') {
     const name = url.searchParams.get('name');
-    const rep = name && variantsReport(records, name, { k: parseInt(url.searchParams.get('k'), 10) || 3 });
-    return rep ? json(res, 200, rep) : json(res, 404, { error: 'Comandante sin datos' });
+    const rep = name && variantsReport(view, name, { k: parseInt(url.searchParams.get('k'), 10) || 3 });
+    return rep ? send(200, rep) : send(404, { error: 'Comandante sin datos' });
   }
   if (url.pathname === '/api/matchups') {
     const name = url.searchParams.get('name');
     const minPods = Math.max(5, Number(url.searchParams.get('minPods')) || 15);
-    const rep = name && matchups(records, name, { minPods });
-    return rep ? json(res, 200, rep) : json(res, 404, { error: 'Comandante sin mesas registradas' });
+    const rep = name && matchups(seatRecords(), name, { minPods });
+    return rep ? send(200, rep) : send(404, { error: 'Comandante sin mesas registradas' });
   }
   if (url.pathname === '/api/matrix') {
     const top = Math.min(20, Math.max(3, Number(url.searchParams.get('top')) || 12));
-    return json(res, 200, matrix(records, top));
+    return send(200, matrix(seatRecords(), top));
   }
   if (url.pathname === '/api/cards-vs') {
     const name = url.searchParams.get('name'), vs = url.searchParams.get('vs');
     const minWith = Math.max(5, Number(url.searchParams.get('minWith')) || 15);
-    const rep = name && vs && cardsVsOpponent(records, name, vs, { minWith });
-    return rep ? json(res, 200, rep) : json(res, 404, { error: 'Sin datos para ese enfrentamiento' });
+    const rep = name && vs && cardsVsOpponent(seatRecords(), name, vs, { minWith });
+    return rep ? send(200, rep) : send(404, { error: 'Sin datos para ese enfrentamiento' });
   }
 
   // Estáticos (con protección frente a path traversal)
@@ -181,9 +285,20 @@ const server = http.createServer((req, res) => {
   if (!file.startsWith(PUBLIC + path.sep) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
     res.writeHead(404); return res.end('No encontrado');
   }
-  res.writeHead(200, { 'Content-Type': TYPES[path.extname(file)] || 'application/octet-stream' });
-  fs.createReadStream(file).pipe(res);
+  return serveStatic(res, file);
+};
+
+// Un error inesperado en una petición no debe tumbar el servidor: se responde 500 y se sigue.
+const server = http.createServer((req, res) => {
+  try { handle(req, res); } catch (e) { fail(res, e); }
 });
+function fail(res, e) {
+  console.error('Error en la petición:', e && e.stack || e);
+  if (!res.headersSent) { try { json(res, 500, { error: 'Error interno' }); } catch { res.destroy(); } } else res.end();
+}
+// Red de seguridad para errores fuera de una petición (por ejemplo en una actualización)
+process.on('uncaughtException', e => console.error('Error no controlado:', e && e.stack || e));
+process.on('unhandledRejection', e => console.error('Promesa rechazada:', e && e.stack || e));
 
 loadCache();
 server.listen(PORT, () => console.log(`http://localhost:${PORT} ${MOCK ? '(modo demo)' : ''}`));

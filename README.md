@@ -2,14 +2,18 @@
 
 Web pequeña que descarga torneos cEDH de la [API de TopDeck.gg](https://topdeck.gg/docs/tournaments-v2) y, para el comandante que elijas, muestra:
 
-- Winrate, intervalo de confianza al 95 % y comparación con el 25 % neutro de una mesa de 4.
+- Winrate, intervalo de confianza al 95 % y comparación con la **media del meta** del periodo elegido (que ya incluye el efecto de los empates; el azar puro en mesas de 4 sería 25 %). Los «pts» son puntos de winrate; solo se colorean cuando el intervalo no incluye la media.
 - Cartas asociadas a **más** y a **menos** winrate (diferencia entre los mazos que la juegan y los que no, con su estadístico z).
 - Cartas más jugadas con ese comandante y su inclusión.
 - **Matchups:** cómo rinde ese comandante cuando cada otro comandante del meta está en su mesa, y una matriz de los 12 más jugados.
 - **Cartas contra un rival:** al hacer clic en un rival, qué cartas rinden mejor o peor en las mesas donde está. Muestra también el efecto general de la carta y el «exceso» (la diferencia entre ambos) para separar las cartas buenas contra ese rival de las que son buenas siempre.
+- **Empates:** selector «Fuera del cálculo» (por defecto: winrate = victorias ÷ (victorias + derrotas), referencia ≈ 25 %) o «Cuentan como no ganadas» (victorias ÷ todas las partidas). La tasa de empates se muestra aparte. Afecta a todo, incluidos matchups y matriz: con empates fuera, solo cuentan las mesas con ganador y con todos los comandantes conocidos (≈80 % de las mesas con ganador).
 - **Periodo:** 1, 3 o 6 meses (parámetro `days`). Se filtra en local sobre la caché.
 - **Mapa de cartas:** popularidad frente a diferencia de winrate, con las cartas en cuatro cuadrantes. Las diferencias se muestran también *ajustadas* (encogidas según el tamaño de la muestra) y con una *fiabilidad* corregida por comparaciones múltiples.
-- **Mi lista:** pega tu lista y compara con el meta de ese comandante: cartas a revisar, cartas muy jugadas que no llevas y opciones con buen rendimiento. Se recuerda en el navegador y permite copiar las cartas sugeridas.
+- **Mi lista:** pega tu lista y obtienes un informe con solo datos de TopDeck: cuánto se parece tu lista al meta (cartas estándar, comunes, tech y raras), la variante del comandante más parecida, las listas reales más parecidas (torneo y récord, sin nombres de jugadores) y lo que te falta o te sobra **frente a las listas más parecidas a la tuya** (las que casi todas llevan y tú no, alternativas habituales y cartas poco habituales). Las recomendaciones reflejan lo que juegan listas parecidas, no el winrate asociado a cada carta: lo comprobamos con cambios reales de lista de los mismos jugadores (2.417 pares) y ese winrate no predice mejoras, así que daba consejos absurdos (revisar *Force of Will* o *Rhystic Study*). Se recuerda en el navegador y permite copiar las cartas sugeridas. Incluye un botón para copiar la lista y un enlace a [Commander Spellbook](https://commanderspellbook.com/find-my-combos/) para ver sus combos.
+- **Buscar carta:** escribes una carta (con sugerencias) y ves en cuántos mazos cEDH se juega, en qué comandantes y con qué frecuencia, cómo ha evolucionado su uso mes a mes y qué cartas suelen acompañarla. Solo mira uso, no resultados. Va con un índice carta → mazos que se construye una sola vez al cargar o actualizar los datos (≈0,5 s y ≈15 MB), así que cada búsqueda tarda decenas de milisegundos.
+- **Paquetes y alternativas:** dentro de un comandante, qué cartas se juegan juntas (combos y paquetes de un plan) y cuáles casi nunca coinciden (alternativas o planes distintos), medido solo por uso con el coeficiente phi. Sustituye a las antiguas «sinergias» por winrate de pares, que daban parejas sin sentido.
+- **Solo torneos cEDH:** el formato «EDH» de TopDeck incluye torneos casuales, de precons, de presupuesto o brawl. Se descartan siempre, detectándolos por el contenido de los mazos (la mediana de cartas típicas de cEDH por mazo del torneo debe ser de 8 o más; en torneos cEDH reales ronda 20 y en los casuales 0-6), no por el nombre. La web avisa de cuántos se excluyen. `ALL_TOURNAMENTS=1` lo desactiva solo para depurar.
 - **Evolución en el tiempo:** winrate y presencia por periodos de 30 días, y cartas en ascenso o descenso.
 - **Variantes:** agrupa los mazos de un comandante por las cartas que comparten y compara el winrate de cada grupo.
 - **Sinergias:** pares de cartas que juntas rinden más (o menos) de lo que suman por separado.
@@ -41,6 +45,8 @@ La primera carga descarga `DAYS` días (por defecto 180) en ventanas de 7 días,
 | `PARTICIPANT_MIN` | 16 | Mínimo de jugadores por torneo |
 | `REFRESH_HOURS` | 6 | Frecuencia de actualización |
 | `PORT` | 3000 | Puerto |
+| `WINDOW_DAYS` | 3 | Días por petición al descargar (menos = menos memoria) |
+| `ALL_TOURNAMENTS` | — | `1` incluye también los torneos que no parecen cEDH (solo depuración) |
 | `DATA_DIR` | `./data` | Dónde guardar la caché |
 
 ## Despliegue
@@ -57,14 +63,16 @@ La API exige un crédito visible con enlace a TopDeck.gg en cualquier proyecto q
 - Se comparan cientos de cartas a la vez, así que con |z| entre 2 y 3 es fácil que sea casualidad; por encima de ~3 es más fiable.
 - Las cartas que casi todos juegan no tienen mazos "sin ella" con los que comparar y aparecen como `core`.
 - Los empates cuentan como partida no ganada.
+- **Referencia:** con ~20-25 % de partidas empatadas, un mazo medio gana ~20 %, no 25 %. Por eso las comparaciones usan la media real del meta (`metaWinRate`) y no el 25 % fijo; este queda como dato secundario.
+- **Validación:** la página principal comprueba con datos pasados cuántas conclusiones se repiten (por nivel de fiabilidad).
 - **Diferencia ajustada y fiabilidad:** la ajustada acerca a 0 las diferencias con poca muestra; la fiabilidad (q de Benjamini-Hochberg) estima la probabilidad de que sea casualidad al mirar cientos de cartas. Ninguna separa «la carta gana» de «los buenos jugadores la llevan»: no se guarda la posición final de cada jugador.
-- **Sinergias:** dos cartas del mismo plan de juego salen juntas siempre y pueden parecer una sinergia sin serlo; mira también las variantes.
+- **El winrate asociado a una carta no es un efecto causal:** refleja sobre todo quién la juega y con qué plan. Con 2.417 cambios reales de lista (mismo jugador y comandante, torneos distintos), añadir cartas con «buen efecto» no mejoró los resultados (pendiente ≈ 0). Por eso las recomendaciones de la lista se basan en uso, no en winrate.
 - **Matchups:** la unidad es «un mazo en una mesa» (gana 1 de 4). Comparar «con el rival en la mesa» frente a «sin él» arrastra también quién más se sienta; una diferencia pequeña puede ser composición de mesa y no el rival. Las mesas de un mismo torneo no son independientes, así que z es orientativo.
 - Con filtros de tamaño estrechos la muestra baja deprisa: las tablas piden un mínimo de mesas (15 por defecto) con y sin la carta o el rival.
 
 ## Endpoints
 
-`/api/status`, `/api/commanders`, `/api/commander?name=`, `/api/matchups?name=`, `/api/matrix?top=`, `/api/cards-vs?name=&vs=`, `/api/trend?name=`, `/api/synergy?name=`, `/api/variants?name=&k=` y `POST /api/mylist` (`{commander, list}`). Todos aceptan `minPlayers`, `maxPlayers` y `days` (salvo `trend`, que usa todo el histórico).
+Todos aceptan además `dec=1` (empates fuera del cálculo). Las respuestas se comprimen con gzip y los cálculos pesados se guardan en memoria hasta la siguiente actualización de datos. `/api/status`, `/api/commanders`, `/api/commander?name=`, `/api/matchups?name=`, `/api/matrix?top=`, `/api/cards-vs?name=&vs=`, `/api/card?name=` y `/api/cards?q=` (buscador de cartas), `/api/trend?name=`, `/api/synergy?name=`, `/api/variants?name=&k=` y `POST /api/mylist` (`{commander, list}`). Todos aceptan `minPlayers`, `maxPlayers` y `days` (salvo `trend`, que usa todo el histórico).
 
 ## Estructura
 
@@ -72,7 +80,12 @@ La API exige un crédito visible con enlace a TopDeck.gg en cualquier proyecto q
 - `lib/parse.js` — lectura de `decklist` (texto) y `deckObj`.
 - `lib/stats.js` — winrate por comandante y diferencia por carta.
 - `lib/mock.js` — torneos sintéticos con efectos conocidos, usados en los tests.
-- `server.js` + `public/index.html` — servidor y frontend.
+- `lib/cache.js` — formato compacto de la caché y comparte las cadenas en memoria.
+- `lib/cardindex.js` — índice carta → mazos, sugerencias e informe por carta.
+- `lib/rating.js` — modelo de Luce (fuerza por comandante); probado, pero no se usa en la web porque no mejora al winrate directo (ver más abajo).
+- `server.js` — servidor y rutas de la API.
+- `public/index.html` (estructura), `public/app.css` (estilos) y `public/app.js` (lógica). La interfaz va por pestañas: lista (Comandantes · Matriz · Fiabilidad del método) y ficha de comandante (Cartas · Matchups · Evolución · Variantes y paquetes · Mi lista); cada pestaña carga sus datos al abrirla.
+- `scripts/make-seed.js` — genera `seed/records.json` (copia de la caché incluida en el repositorio, `npm run seed`).
 
 ## Comprobación contra la API real
 
