@@ -245,3 +245,26 @@ details.filtersd > .panel { margin: 0; border-top: 0; border-top-left-radius: 0;
 .curve .cb i { display: block; width: 100%; background: var(--accent); opacity: .65; border-radius: 3px 3px 0 0; min-height: 2px; }
 .curve small { font-size: 11px; color: var(--muted); }
 @media (max-width: 560px) { .dgrid { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); } }
+
+/* Tabla de torneos: una línea por puesto del podio y celdas alineadas arriba */
+table.tourn td { vertical-align: top; }
+table.tourn td.podio { min-width: 190px; }
+table.tourn td.podio div { white-space: nowrap; }
+
+tr.few td { color: var(--muted); }
+tr.few td a { color: inherit; }
+
+/* Cambios de lista de un jugador */
+details.chg { border-bottom: 1px solid var(--line); padding: 6px 0; }
+details.chg summary { cursor: pointer; }
+details.chg > div { padding: 6px 0 2px 14px; }
+
+a.plink { color: var(--ink); text-decoration: underline dotted; text-underline-offset: 3px; }
+a.plink:hover { color: var(--accent); text-decoration: underline; }
+
+/* Resumen de 6 meses en la ficha del comandante */
+.mini-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.mini-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; }
+.mini-t { font-weight: 600; margin-bottom: 4px; }
+svg.mini { width: 100%; height: auto; display: block; }
+svg.mini text { fill: var(--muted); font-size: 10.5px; }

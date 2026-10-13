@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { fetchTournaments } = require('./lib/topdeck');
 const tournaments = require('./lib/tournaments');
-const { BASICS, buildRecords, filterRecords, commanderList, classifyTournaments, neighborsReport, commanderReport, metaWinRate, decisive, decisiveSeats, validationReport, myListReport, packagesReport, trendReport, variantsReport, matchups, matrix, cardsVsOpponent } = require('./lib/stats');
+const { cardTrendReport, BASICS, buildRecords, filterRecords, commanderList, classifyTournaments, neighborsReport, commanderReport, metaWinRate, decisive, decisiveSeats, validationReport, myListReport, packagesReport, trendReport, variantsReport, matchups, matrix, cardsVsOpponent } = require('./lib/stats');
 const cache = require('./lib/cache');
 const { parseText } = require('./lib/parse');
 const dataset = require('./lib/dataset');
@@ -87,23 +87,41 @@ async function loadCache() {
     ...(SEED_URL ? [{ label: ' (seed descargado de GitHub)', get: () => fetchRemoteSeed(SEED_URL) }] : []),
     { label: ' (copia del repositorio)', get: async () => JSON.parse(fs.readFileSync(SEED_FILE, 'utf8')) },
   ];
+  // Una caché o un seed guardado antes de que se guardara la posición final de cada mazo no la tiene: se prefiere cualquier
+  // otro origen que sí la tenga (por ejemplo el seed publicado en GitHub), y solo si no hay ninguno se usa el primero válido.
+  const obsolete = raw => raw.filter(r => r.rank).length < raw.length * 0.5;   // `raw`: registros tal como están en el archivo
+  let fallback = null;
+  const apply = ({ label, j, records }) => {
+    for (const [tid, n] of j.excluded || []) excluded.set(tid, n);
+    // Un seed guardado por esta versión ya viene filtrado (lleva la lista `excluded`): no hace falta volver a clasificar
+    state.records = Array.isArray(j.excluded) ? records : keepCedh(records);
+    rebuildIndex();
+    state.updatedAt = j.updatedAt;
+    state.coveredDays = j.days || 90; // las cachés anteriores solo guardaban 90 días
+    console.log(`Caché cargada${label}: ${state.records.length} mazos (${j.updatedAt}) · listo en ${((Date.now() - T0) / 1000).toFixed(1)} s · memoria ${mb()}`);
+  };
   for (const { label, get } of sources) {
     try {
-      const j = await get();
+      let j = await get();
+      // Se comprueba sobre los datos crudos, antes de decodificarlos: decodificar un seed entero ocupa mucha memoria
+      if (!j || !Array.isArray(j.records) || j.records.length < 100) { console.log(`Datos${label} no válidos: se prueba el siguiente origen`); continue; }
+      if (obsolete(j.records)) {
+        console.log(`Datos${label} sin posiciones de torneo (versión anterior): se busca un origen más reciente`);
+        fallback = fallback || { label, get };   // solo se recuerda cómo volver a leerla: no se mantiene en memoria mientras se prueba el resto
+        j = null;
+        continue;
+      }
       const records = cache.decodeAny(j);
       if (!records || records.length < 100) { console.log(`Datos${label} no válidos: se prueba el siguiente origen`); continue; }
-      for (const [tid, n] of j.excluded || []) excluded.set(tid, n);
-      // Un seed guardado por esta versión ya viene filtrado (lleva la lista `excluded`): no hace falta volver a clasificar
-      state.records = Array.isArray(j.excluded) ? records : keepCedh(records);
-      rebuildIndex();
-      state.updatedAt = j.updatedAt;
-      state.coveredDays = j.days || 90; // las cachés anteriores solo guardaban 90 días
-      console.log(`Caché cargada${label}: ${state.records.length} mazos (${j.updatedAt}) · listo en ${((Date.now() - T0) / 1000).toFixed(1)} s · memoria ${mb()}`);
-      return;
+      return apply({ label, j, records });
     } catch (e) {
       // El primero (caché en disco) falla siempre en una instalación nueva: solo se comenta el resto
       if (label) console.log(`No se pudo usar el origen${label}: ${e.message}`);
     }
+  }
+  if (fallback) {
+    try { const j = await fallback.get(); apply({ label: fallback.label, j, records: cache.decodeAny(j) }); }
+    catch (e) { console.log(`No se pudo volver a leer los datos${fallback.label}: ${e.message}`); }
   }
 }
 
@@ -195,7 +213,7 @@ function serveStatic(res, file) {
 const memo = new Map();
 let memoStamp = null;
 const seatCache = { stamp: null, map: new Map() };
-const MEMO_PATHS = new Set(['/api/commander-decks', '/api/tournaments', '/api/tournament', '/api/decks', '/api/deck', '/api/threats', '/api/table', '/api/card', '/api/card-alternatives', '/api/novelties', '/api/meta', '/api/packages', '/api/variants', '/api/trend', '/api/matchups', '/api/matrix', '/api/cards-vs', '/api/validation']);
+const MEMO_PATHS = new Set(['/api/card-trend', '/api/regulars', '/api/teams', '/api/players', '/api/player', '/api/commander-decks', '/api/tournaments', '/api/tournament', '/api/decks', '/api/deck', '/api/threats', '/api/table', '/api/card', '/api/card-alternatives', '/api/novelties', '/api/meta', '/api/packages', '/api/variants', '/api/trend', '/api/matchups', '/api/matrix', '/api/cards-vs', '/api/validation']);
 
 // ---- Combos y amenazas (Commander Spellbook) ----
 // Se consulta a Spellbook solo cuando alguien abre los combos de un comandante; el resultado se guarda 24 h y las
@@ -274,7 +292,21 @@ const handle = (req, res) => {
   }
   // ---- Torneos y listas que hicieron top (solo lee los mazos ya descargados) ----
   if (url.pathname === '/api/tournaments') {
-    return send(200, tournaments.tournamentsReport(records, { q: url.searchParams.get('q') || '', limit: Math.min(100, parseInt(url.searchParams.get('limit'), 10) || 30) }));
+    return send(200, tournaments.tournamentsReport(records, { q: url.searchParams.get('q') || '', limit: Math.min(100, parseInt(url.searchParams.get('limit'), 10) || 30), offset: parseInt(url.searchParams.get('offset'), 10) || 0, sort: url.searchParams.get('sort') === 'size' ? 'size' : 'date' }));
+  }
+  if (url.pathname === '/api/regulars') {
+    const sort = ['tournaments', 'luck', 'winrate'].includes(url.searchParams.get('sort')) ? url.searchParams.get('sort') : 'tournaments';
+    return send(200, tournaments.regularsReport(view, { minTournaments: Math.min(30, Math.max(2, parseInt(url.searchParams.get('min'), 10) || 5)), sort, q: (url.searchParams.get('q') || '').slice(0, 60) }));
+  }
+  if (url.pathname === '/api/teams') {
+    return send(200, tournaments.teamsReport(view, { q: (url.searchParams.get('q') || '').slice(0, 40) }));
+  }
+  if (url.pathname === '/api/players') {
+    return send(200, tournaments.playersSearch(view, (url.searchParams.get('q') || '').slice(0, 60)));
+  }
+  if (url.pathname === '/api/player') {
+    const rep = tournaments.playerReport(view, tournaments.nameKey((url.searchParams.get('key') || '').slice(0, 80)), { meta: metaWinRate(view), seatRecords: seatRecords() });
+    return rep ? send(200, rep) : send(404, { error: 'Jugador no encontrado en este periodo' });
   }
   if (url.pathname === '/api/commander-decks') {
     const g = k => (url.searchParams.get(k) || '').slice(0, 120);
@@ -328,6 +360,13 @@ const handle = (req, res) => {
     const all = filterRecords(state.records, { minPlayers, maxPlayers });
     const rep = validationReport(dec ? decisive(all) : all);
     return rep ? send(200, rep) : send(404, { error: 'Muestra insuficiente para validar' });
+  }
+  if (url.pathname === '/api/card-trend') {
+    // Como la tendencia del comandante: todo el histórico (respetando solo el filtro de jugadores por torneo)
+    const name = (url.searchParams.get('name') || '').slice(0, 200), card = (url.searchParams.get('card') || '').slice(0, 120);
+    const all = filterRecords(state.records, { minPlayers, maxPlayers });
+    const rep = name && card && cardTrendReport(dec ? decisive(all) : all, name, card);
+    return rep ? send(200, rep) : send(404, { error: 'Comandante no encontrado' });
   }
   if (url.pathname === '/api/trend') {
     const name = url.searchParams.get('name');
@@ -435,8 +474,21 @@ const handle = (req, res) => {
   return serveStatic(res, file);
 };
 
+// Cabeceras de seguridad en todas las respuestas. La web no usa scripts ni manejadores en línea (los estilos en línea sí),
+// y solo habla con este servidor y con Scryfall (imágenes y tipos de carta, desde el navegador).
+const SECURITY_HEADERS = {
+  'Content-Security-Policy': ["default-src 'self'", "script-src 'self'", "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: https://api.scryfall.com https://*.scryfall.io", "connect-src 'self' https://api.scryfall.com",
+    "object-src 'none'", "base-uri 'none'", "form-action 'none'", "frame-ancestors 'none'"].join('; '),
+  'X-Content-Type-Options': 'nosniff',
+  'X-Frame-Options': 'DENY',
+  'Referrer-Policy': 'strict-origin-when-cross-origin',
+  'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=()',
+};
+
 // Un error inesperado en una petición no debe tumbar el servidor: se responde 500 y se sigue.
 const server = http.createServer((req, res) => {
+  for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.setHeader(k, v);
   try { handle(req, res); } catch (e) { fail(res, e); }
 });
 function fail(res, e) {

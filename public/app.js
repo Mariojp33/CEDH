@@ -131,6 +131,7 @@ function writeHash() {
   if (view.tab) h.set('t', view.tab);
   if (view.sub && SUBTAB_OWNERS.has(view.tab)) h.set('s', view.sub);
   if (view.t === 'list' && view.card && view.tab === 'cartas') h.set('card', view.card);
+  if (view.t === 'list' && view.tab === 'torneos' && view.sub === 'jugadores' && view.player) h.set('p', view.player);
   if (view.t === 'cmd') h.set('c', view.name);
   if (view.t === 'cmp') { h.set('c', view.a); h.set('vs', view.b); }
   try { history.replaceState(null, '', '#' + h); } catch { /* sin historial (vista previa) */ }
@@ -145,7 +146,7 @@ function readHash() {
   const tab = h.get('t') || undefined;
   if (h.get('c') && h.get('vs')) view = { t: 'cmp', a: h.get('c'), b: h.get('vs') };
   else if (h.get('c')) view = { t: 'cmd', name: h.get('c'), minWith: 5, tab };
-  else view = { t: 'list', tab, sub: h.get('s') || undefined, card: h.get('card') || undefined };
+  else view = { t: 'list', tab, sub: h.get('s') || undefined, card: h.get('card') || undefined, player: h.get('p') || undefined };
 }
 const store = {
   get: k => { try { return localStorage.getItem(k) || ''; } catch { return ''; } },
@@ -376,7 +377,7 @@ async function runTable() {
       <div class="panel">
         <h2>${cmdBtn(r.me, cmdLabel(r.me))} contra ${r.rows.map(x => esc(cmdLabel(x.rival))).join(', ')}</h2>
         <div class="muted" style="margin-bottom:8px">${r.pods} mesas de este comandante · winrate general ${pct(r.baseline)}</div>
-        <table><thead><tr><th>Rival en la mesa</th><th class="n">Mesas con él</th><th class="n">Winrate con él</th><th class="n">Sin él</th><th class="n">Diferencia</th><th class="n">z</th></tr></thead><tbody>${rows}</tbody></table>
+        <table><thead><tr><th>Rival en la mesa</th><th class="n">Mesas con él</th><th class="n">Winrate con él</th><th class="n">Sin él</th><th class="n">Diferencia</th><th class="n" title="z: cuántas veces mayor es la diferencia que lo que cabría por azar. Cerca de 0 = no se distingue del azar; por encima de 2 o por debajo de −2 es llamativo (solo entonces se colorea). Positivo = mejor con ese rival; negativo = peor.">z</th></tr></thead><tbody>${rows}</tbody></table>
         ${multi}
         <div class="note">Los matchups en cEDH suelen ser <b>casi planos</b>: un z cerca de 0 significa que no se distingue de jugar sin ese rival (solo se colorea con |z| ≥ 2). Es histórico, no una predicción: las mesas de un mismo torneo no son independientes y cambiar de rival cambia también a quién más te sientas. ${F.dec ? 'Solo mesas con ganador y rivales conocidos.' : 'Los empates cuentan como mesa no ganada.'}</div>
       </div>
@@ -840,10 +841,11 @@ const srcLink = u => { const h = hostOf(u); return h ? `<a href="${esc(u)}" targ
 function deckRows(list, { withTournament = false, withCommander = true } = {}) {
   return list.map(d => `<tr>
     ${withTournament ? `<td class="muted">${dateEs(d.date)}</td><td>${esc(short(String(d.name || ''), 52))}</td><td class="n" title="Jugadores del torneo">${d.size}</td>` : ''}
-    <td class="n" data-v="${d.rank}">${posLabel(d.rank, d.cut)}</td><td>${esc(d.player || '—')}</td>${withCommander ? `<td>${cmdLink(d.commander)}</td>` : ''}
+    <td class="n" data-v="${d.rank}">${posLabel(d.rank, d.cut)}</td><td>${d.player ? `<a href="#" class="plink" data-player="${esc(d.player)}" title="Ver las estadísticas de este jugador">${esc(d.player)}</a>` : '—'}</td>${withCommander ? `<td>${cmdLink(d.commander)}</td>` : ''}
     ${recCell(d)}<td>${srcLink(d.url)}</td><td>${d.rank ? `<button type="button" class="ghost" data-deck="${esc(d.tid)}" data-rank="${d.rank}">Ver lista</button>` : ''}</td></tr>`).join('');
 }
 function bindDeckButtons(root, target) {
+  root.querySelectorAll('.plink').forEach(a => { a.onclick = e => { e.preventDefault(); openPlayer(a.dataset.player); }; });
   root.querySelectorAll('[data-deck]').forEach(b => { b.onclick = () => showDeck(b.dataset.deck, Number(b.dataset.rank), target); });
 }
 // ---- Vista visual de una lista (tipo Moxfield) ----
@@ -944,10 +946,10 @@ async function showDeck(tid, rank, target) {
 }
 // Un torneo: por defecto el top cut; se puede ver a todos, ordenar por resultados y filtrar por comandante o jugador.
 function showTournament(t, det, dk) {
-  det.innerHTML = `<div class="panel"><h2>${esc(t.name)}</h2><div class="muted">${dateEs(t.date)} · ${t.size} jugadores${t.elo ? ` · Elo medio ${t.elo}` : ''} · pasaron al top cut ${t.cut}</div>
+  det.innerHTML = `<div class="panel"><h2>${esc(t.name)}</h2><div class="muted">${dateEs(t.date)} · ${t.size} jugadores${t.elo ? ` · Elo medio ${t.elo}` : ''} · ${t.hasRanks ? `pasaron al top cut ${t.cut}` : 'sin puestos guardados: se ordena por récord'}</div>
     <div class="tablepick" style="margin-top:10px">
-      <label>Ver <select id="tt-scope"><option value="cut">Top cut (${t.decks.filter(d => d.inCut).length})</option><option value="all">Todos los jugadores con lista (${t.decks.length})</option></select></label>
-      <label>Orden <select id="tt-sort"><option value="rank">Puesto final</option><option value="wr">Mejor porcentaje de victorias</option><option value="wins">Más victorias</option></select></label>
+      <label>Ver <select id="tt-scope">${t.hasRanks ? `<option value="cut">Top cut (${t.decks.filter(d => d.inCut).length})</option>` : ''}<option value="all">Todos los jugadores con lista (${t.decks.length})</option></select></label>
+      <label>Orden <select id="tt-sort">${t.hasRanks ? '<option value="rank">Puesto final</option>' : ''}<option value="wr">Mejor porcentaje de victorias</option><option value="wins">Más victorias</option></select></label>
       <label>Buscar <input type="search" id="tt-q" placeholder="comandante o jugador" autocomplete="off"></label>
     </div>
     <div id="tt-out" style="margin-top:10px"></div>
@@ -955,7 +957,7 @@ function showTournament(t, det, dk) {
   const draw = () => {
     const needle = det.querySelector('#tt-q').value.toLowerCase().trim(), scope = det.querySelector('#tt-scope').value, sort = det.querySelector('#tt-sort').value;
     let list = t.decks.filter(d => (scope === 'all' || d.inCut) && (!needle || d.commander.toLowerCase().includes(needle) || String(d.player || '').toLowerCase().includes(needle)));
-    const by = { rank: (a, b) => a.rank - b.rank, wr: (a, b) => (wrOf(b) ?? -1) - (wrOf(a) ?? -1) || b.wins - a.wins || a.rank - b.rank, wins: (a, b) => b.wins - a.wins || a.rank - b.rank };
+    const by = { rank: t.hasRanks ? (a, b) => a.rank - b.rank : (a, b) => b.wins - a.wins || a.losses - b.losses,  wr: (a, b) => (wrOf(b) ?? -1) - (wrOf(a) ?? -1) || b.wins - a.wins || a.rank - b.rank, wins: (a, b) => b.wins - a.wins || a.rank - b.rank };
     list = [...list].sort(by[sort]);
     det.querySelector('#tt-out').innerHTML = list.length ? `<table><thead><tr><th class="n">Puesto</th><th>Jugador</th><th>Comandante</th><th class="n" title="Victorias-empates-derrotas en ese torneo (incluye el top cut) y porcentaje de victorias">Récord</th><th>Enlace</th><th></th></tr></thead><tbody>${deckRows(list)}</tbody></table>`
       : '<span class="muted">Ningún jugador coincide con la búsqueda.</span>';
@@ -966,28 +968,41 @@ function showTournament(t, det, dk) {
   draw(); det.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 }
 async function bindTournaments() {
-  const q = $('#tr-q'), out = $('#tr-out'), det = $('#tr-det'), dk = $('#tr-deck');
-  let timer, seq = 0;
-  const load = async () => {
-    const my = ++seq;
-    let r;
-    try { r = await api('/api/tournaments?limit=40&q=' + encodeURIComponent(q.value.trim())); } catch (e) { out.innerHTML = `<span class="muted">No se pudo cargar: ${esc(e.message)}</span>`; return; }
-    if (my !== seq) return;
-    if (!r.ranked) { out.innerHTML = noRanksNote; return; }
-    if (!r.tournaments.length) { out.innerHTML = '<span class="muted">Ningún torneo coincide con la búsqueda.</span>'; return; }
-    out.innerHTML = `<table><thead><tr><th>Fecha</th><th>Torneo</th><th class="n">Jugadores</th><th>Podio</th><th></th></tr></thead><tbody>${r.tournaments.map(t => `<tr>
+  const q = $('#tr-q'), sort = $('#tr-sort'), out = $('#tr-out'), more = $('#tr-more'), det = $('#tr-det'), dk = $('#tr-deck');
+  const PAGE = 40, per = { 30: 'el último mes', 90: 'los últimos 3 meses', 180: 'los últimos 6 meses' }[F.days] || `los últimos ${F.days} días`;
+  let timer, seq = 0, shown = 0;
+  const rowsOf = list => list.map(t => `<tr>
       <td class="muted" data-v="${t.date}">${dateEs(t.date)}</td><td>${esc(short(String(t.name || ''), 52))}${t.elo ? ` <span class="muted" title="Elo medio de los jugadores">· Elo ${t.elo}</span>` : ''}</td><td class="n">${t.size}</td>
-      <td>${t.top.map(d => `<span class="muted">${d.rank}.º</span> ${esc(cmdLabel(d.commander))}`).join(' · ')}</td>
-      <td><button type="button" class="ghost" data-tid="${esc(t.tid)}">Ver top ${t.cut}</button></td></tr>`).join('')}</tbody></table>
-      <div class="note">${r.total > r.tournaments.length ? `Se muestran ${r.tournaments.length} de ${r.total} torneos; afina la búsqueda para ver otros. ` : ''}«Podio» son los cuatro primeros puestos.</div>`;
-    out.querySelectorAll('[data-tid]').forEach(b => { b.onclick = async () => {
-      det.innerHTML = '<div class="panel muted">Cargando…</div>'; dk.innerHTML = '';
-      try { showTournament(await api('/api/tournament?tid=' + encodeURIComponent(b.dataset.tid)), det, dk); }
-      catch (e) { det.innerHTML = `<div class="panel muted">${esc(e.message)}</div>`; }
-    }; });
+      <td class="podio">${t.hasRanks ? t.top.map(d => `<div><span class="muted">${d.rank}.º</span> ${esc(cmdLabel(d.commander))}</div>`).join('') : '<span class="muted" title="Se guardará al renovar el seed">sin puestos guardados</span>'}</td>
+      <td><button type="button" class="ghost" data-tid="${esc(t.tid)}">${t.hasRanks ? `Ver top ${t.cut}` : 'Ver jugadores'}</button></td></tr>`).join('');
+  const bindRows = () => out.querySelectorAll('[data-tid]:not([data-b])').forEach(b => { b.dataset.b = 1; b.onclick = async () => {
+    det.innerHTML = '<div class="panel muted">Cargando…</div>'; dk.innerHTML = '';
+    try { showTournament(await api('/api/tournament?tid=' + encodeURIComponent(b.dataset.tid)), det, dk); }
+    catch (e) { det.innerHTML = `<div class="panel muted">${esc(e.message)}</div>`; }
+  }; });
+  const load = async append => {
+    const my = ++seq;
+    if (!append) { shown = 0; out.innerHTML = '<span class="muted">Cargando…</span>'; }
+    let r;
+    try { r = await api(`/api/tournaments?limit=${PAGE}&offset=${shown}&sort=${sort.value}&q=${encodeURIComponent(q.value.trim())}`); } catch (e) { out.innerHTML = `<span class="muted">No se pudo cargar: ${esc(e.message)}</span>`; return; }
+    if (my !== seq) return;
+    if (!r.total) {
+      out.innerHTML = `<span class="muted">Ningún torneo coincide con la búsqueda en ${per}${F.days < 180 ? ': prueba con un periodo más largo en los filtros (6 meses)' : ''}${F.min || F.max ? ' o quita el filtro de jugadores por torneo' : ''}.</span>`;
+      more.hidden = true; return;
+    }
+    if (append) out.querySelector('tbody').insertAdjacentHTML('beforeend', rowsOf(r.tournaments));
+    else out.innerHTML = `<table class="tourn"><thead><tr><th>Fecha</th><th>Torneo</th><th class="n">Jugadores</th><th>Podio</th><th></th></tr></thead><tbody>${rowsOf(r.tournaments)}</tbody></table>
+      <div class="note" id="tr-note"></div>`;
+    out.querySelector('#tr-note').dataset.r = r.ranked;
+    shown += r.tournaments.length;
+    bindRows();
+    out.querySelector('#tr-note').textContent = `${shown} de ${r.total} ${r.total === 1 ? 'torneo' : 'torneos'} en ${per}. «Podio» son los cuatro primeros puestos.${Number(out.querySelector('#tr-note').dataset.r) ? '' : ' Todavía no hay puestos guardados: aparecerán al renovar el seed.'}${F.days < 180 ? ' Para ver torneos más antiguos, amplía el periodo en los filtros.' : ''}`;
+    more.hidden = shown >= r.total; more.textContent = `Mostrar más (${r.total - shown} restantes)`;
   };
-  q.oninput = () => { clearTimeout(timer); timer = setTimeout(load, 250); };
-  load();
+  more.onclick = () => load(true);
+  sort.onchange = () => load(false);
+  q.oninput = () => { clearTimeout(timer); timer = setTimeout(() => load(false), 250); };
+  load(false);
 }
 async function bindTopDecks() {
   const f = { cmd: $('#td-cmd'), card: $('#td-card'), pl: $('#td-pl'), scope: $('#td-scope') }, out = $('#td-out'), dk = $('#td-deck'), box = $('#td-sug');
@@ -1057,9 +1072,13 @@ async function loadCommanderTournaments(name) {
 const torneosHtml = () => `<div class="panel">
     <h2>Torneos y su podio</h2>
     <div class="muted" style="margin-bottom:8px">Los torneos cEDH del periodo elegido, del más reciente al más antiguo. Busca por nombre del torneo, jugador o comandante y abre su top cut para ver cada lista.</div>
-    <label class="sr" for="tr-q">Buscar torneos</label>
-    <input type="search" id="tr-q" placeholder="Nombre del torneo, jugador o comandante…" autocomplete="off">
+    <div class="tablepick">
+      <label class="sr" for="tr-q">Buscar torneos</label>
+      <input type="search" id="tr-q" placeholder="Nombre del torneo, jugador o comandante…" autocomplete="off" style="flex:1;min-width:200px">
+      <label>Orden <select id="tr-sort"><option value="date">Más recientes</option><option value="size">Más jugadores</option></select></label>
+    </div>
     <div id="tr-out" style="margin-top:10px" class="muted">Cargando…</div>
+    <div style="margin-top:8px"><button type="button" class="ghost" id="tr-more" hidden>Mostrar más</button></div>
   </div><div id="tr-det"></div><div id="tr-deck"></div>`;
 const topDecksHtml = () => `<div class="panel">
     <h2>Buscar listas que hicieron top</h2>
@@ -1074,13 +1093,211 @@ const topDecksHtml = () => `<div class="panel">
     <div id="td-sug" class="sugs" role="listbox" aria-label="Sugerencias de cartas"></div>
     <div id="td-out" style="margin-top:10px"></div>
   </div><div id="td-deck"></div>`;
+// ---- Jugadores ----
+// Se agrupa por el nombre con el que se inscribe en TopDeck (sin las etiquetas entre corchetes): no hay identificador de persona.
+let playerGo = null;                                  // carga el perfil de un jugador (la pestaña lo define al abrirse)
+function openPlayer(name) {
+  view.sub = 'jugadores'; view.player = name;
+  goTab('torneos');
+  const b = document.querySelector('#tor-host [data-sub=jugadores]');
+  if (b) b.click();
+  const run = () => playerGo ? playerGo(name) : setTimeout(run, 100);
+  run();
+}
+function playerExtras(r) {
+  const top = x => x == null ? '—' : `primer ${Math.max(1, Math.round(x * 100))} %`;
+  const chg = (a, b, better) => a == null || b == null ? '' : Math.abs(a - b) < 0.02 ? 'igual' : (better(a, b) ? 'mejor' : 'peor');
+  let html = '';
+  // Forma reciente
+  const h = r.history.filter(t => t.pctl != null);
+  if (h.length >= 3 || r.form) {
+    const f = r.form, bars = h.length >= 3 ? h : null;
+    html += `<div class="panel"><h2>Forma reciente</h2>
+      ${bars ? `<div class="muted" style="margin-bottom:6px">Posición en cada torneo, del más antiguo al más reciente: cuanto más alta la barra, mejor puesto relativo (cima = campeón).</div>
+      <div class="spark">${bars.map(t => `<div class="sb" title="${esc(t.name)} · ${t.rank}.º de ${t.size}"><small>${t.rank}.º</small><i style="height:${Math.max(3, Math.round((1 - t.pctl) * 60))}px"></i><small class="d">${new Date(t.date * 1000).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' })}</small></div>`).join('')}</div>` : ''}
+      ${f ? `<div style="margin-top:10px">Últimos <b>${f.recent.tournaments}</b> torneos: de media en el <b>${top(f.recent.pctl)}</b> de la clasificación y <b>${f.recent.winRate == null ? '—' : pct(f.recent.winRate, 0)}</b> de victorias. Antes (${f.before.tournaments} torneos): ${top(f.before.pctl)} y ${f.before.winRate == null ? '—' : pct(f.before.winRate, 0)}.
+        ${f.recent.pctl != null && f.before.pctl != null ? `Su posición reciente es <b>${chg(f.before.pctl, f.recent.pctl, (a, b) => b < a)}</b> que antes.` : ''}</div>
+      <div class="note">Con tan pocos torneos, un cambio de esta forma suele ser ruido: un buen o mal fin de semana mueve mucho la media. Tómalo como una pista, no como una tendencia demostrada.</div>` : '<div class="note">Con menos de 6 torneos todavía no se compara la forma reciente con la anterior.</div>'}</div>`;
+  }
+  // Nivel del torneo
+  if (r.tiers) {
+    html += `<div class="panel"><h2>Según el nivel del torneo</h2>
+      <div class="muted" style="margin-bottom:8px">El nivel es el Elo medio de los inscritos, partido en tres tramos con todos los torneos (límites: ${r.tiers.cuts.map(Math.round).join(' y ')}).</div>
+      <table><thead><tr><th>Nivel</th><th class="n">Torneos</th><th class="n">Partidas</th><th class="n">Winrate</th><th class="n">Puesto medio</th></tr></thead><tbody>
+      ${r.tiers.rows.map(t => `<tr><td>${t.label}</td><td class="n">${t.tournaments}</td><td class="n muted">${t.games}</td><td class="n">${t.winRate == null ? '—' : pct(t.winRate, 0)}</td><td class="n">${t.pctl == null ? '—' : top(t.pctl)}</td></tr>`).join('')}</tbody></table>
+      <div class="note">Solo cuentan los torneos con Elo medio conocido (los descargados recientemente). Un buen resultado en torneos de nivel alto vale más que en uno flojo, pero con pocas partidas por tramo las diferencias pueden ser casualidad.</div></div>`;
+  }
+  // Contra qué comandantes: todos los rivales con los que ha coincidido; los de pocas mesas salen en gris y sin interpretar
+  const m = r.matchups;
+  if (m) {
+    const few = m.rows.filter(x => !x.enough).length;
+    html += `<div class="panel"><h2>Contra qué comandantes</h2>
+      ${m.rows.length ? `<div class="muted" style="margin-bottom:8px">Sus mesas en las que estaba cada comandante rival. Su winrate general por mesa es <b>${m.winRate == null ? '—' : pct(m.winRate, 0)}</b> en ${m.pods} mesas.${few ? ` Los de menos de ${m.minPods} mesas (${few}) salen en gris: son casos sueltos, no una tendencia.` : ''}</div>
+      <table><thead><tr><th>Rival en la mesa</th><th class="n">Mesas</th><th class="n">Victorias</th><th class="n">Winrate</th><th class="n" title="Intervalo de confianza al 95 %">Intervalo</th></tr></thead><tbody>
+      ${m.rows.map(x => `<tr class="${x.enough ? '' : 'few'}"><td>${cmdLink(x.opponent)}</td><td class="n">${x.pods}</td><td class="n muted">${x.wins}</td>
+        <td class="n ${x.enough ? tone(x.ci[0] > m.winRate ? 1 : x.ci[1] < m.winRate ? -1 : 0) : 'muted'}">${pct(x.winRate, 0)}</td><td class="n muted">${x.enough ? `${pct(x.ci[0], 0)}–${pct(x.ci[1], 0)}` : 'pocas mesas'}</td></tr>`).join('')}</tbody></table>
+      <div class="note">${m.total > m.rows.length ? `Se muestran los ${m.rows.length} rivales con más mesas de ${m.total}. ` : ''}Solo se colorea cuando hay ${m.minPods} mesas o más y el intervalo queda entero por encima o por debajo de su winrate general. Con tan pocas mesas casi nunca ocurre: lo normal es que las diferencias sean casualidad, y en una mesa también juegan otros dos o tres comandantes.</div>`
+      : '<div class="muted">No hay mesas con ganador y rivales conocidos de este jugador en este periodo.</div>'}</div>`;
+  }
+  // Cómo cambia sus listas
+  if (r.changes && r.changes.length) {
+    const res = b => b.rank ? `${b.rank}.º de ${b.size}` : (b.winRate == null ? '—' : `${pct(b.winRate, 0)} de victorias`);
+    const chips = l => l.length ? l.map(c => cn(c)).join(', ') : '<span class="muted">ninguna</span>';
+    html += `<div class="panel"><h2>Cómo cambia sus listas</h2>
+      <div class="muted" style="margin-bottom:8px">Para los comandantes que ha jugado en varios torneos: qué cartas ha metido y quitado de un torneo al siguiente (sin contar tierras básicas), y cómo le fue en cada uno.</div>
+      ${r.changes.map(c => `<h3 style="margin:14px 0 6px">${cmdLink(c.commander)} <span class="muted" style="font-weight:400">· ${c.decks} listas · cambia de media ${c.avgChanged.toFixed(1).replace('.', ',')} cartas entre torneos${c.identical ? ` · ${c.identical} ${c.identical === 1 ? 'vez' : 'veces'} la misma lista` : ''}</span></h3>
+        ${c.steps.map(x => `<details class="chg"><summary><span class="muted">${new Date(x.from.date * 1000).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' })} → ${new Date(x.to.date * 1000).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' })}</span>
+          · <b class="pos-t">+${x.added.length}</b> <b class="neg-t">−${x.removed.length}</b> · ${res(x.from)} → <b>${res(x.to)}</b></summary>
+          <div><b>Mete:</b> ${chips(x.added)}</div><div style="margin-top:4px"><b>Quita:</b> ${chips(x.removed)}</div></details>`).join('')}`).join('')}
+      <div class="note">Es información, no un consejo: en nuestros datos los cambios de cartas de un mismo jugador no explican bien la diferencia de resultados (el puesto en un torneo depende sobre todo de la suerte de las mesas y de los rivales). Se muestran los 8 últimos cambios de cada comandante.</div></div>`;
+  }
+  return html;
+}
+function playerHtml(r) {
+  const days = t => new Date(t * 1000).toLocaleDateString('es-ES', { month: 'short', year: 'numeric' });
+  const few = r.games < 20;
+  const base = r.meta;
+  const rel = r.winRate == null ? '' : r.ci[0] > base ? 'pos-t' : r.ci[1] < base ? 'neg-t' : 'muted';
+  const lk = r.luck;
+  const vs = (a, e) => `<b>${a}</b> <span class="muted">(por azar se esperarían ${e.toFixed(e < 1 ? 2 : 1).replace('.', ',')})</span>`;
+  return `<div class="panel">
+    <h2>${esc(r.name)}</h2>
+    <div class="muted">${r.aliases.length > 1 ? `También aparece como: ${r.aliases.filter(a => a !== r.name).map(esc).join(', ')} · ` : ''}${r.tournaments} ${r.tournaments === 1 ? 'torneo' : 'torneos'} · ${r.decks} ${r.decks === 1 ? 'mazo' : 'mazos'} · de ${days(r.firstDate)} a ${days(r.lastDate)}</div>
+    <div class="tiles" style="margin-top:12px">
+      <div class="tile"><div class="v ${rel}">${r.winRate == null ? '—' : pct(r.winRate)}</div><div class="l">winrate (IC 95 %: ${pct(r.ci[0])}–${pct(r.ci[1])}) · media del meta ${pct(base)}</div></div>
+      <div class="tile"><div class="v">${r.games}</div><div class="l">partidas${F.dec ? ' con ganador' : ''} · ${r.wins} victorias</div></div>
+      ${lk ? `<div class="tile"><div class="v">${lk.cut}</div><div class="l">veces en el top cut de ${lk.ranked} torneos con puesto ${vs('', lk.expectedCut).replace('<b></b> ', '')}</div></div>
+      <div class="tile"><div class="v">${lk.wins}</div><div class="l">torneos ganados ${vs('', lk.expectedWins).replace('<b></b> ', '')}</div></div>` : ''}
+    </div>
+    ${few ? `<div class="note">Hay pocas partidas (${r.games}): el winrate de este jugador puede ser pura casualidad; mira el intervalo de confianza.</div>` : ''}
+    ${lk ? '' : '<div class="note">Aún no hay puestos guardados para este jugador (aparecerán al renovar el seed).</div>'}
+  </div>
+  ${playerExtras(r)}
+  <div class="panel"><h2>Comandantes que ha jugado</h2>
+    <table><thead><tr><th>Comandante</th><th class="n">Mazos</th><th class="n">Partidas</th><th class="n">Winrate</th><th class="n">Top cut</th></tr></thead><tbody>
+    ${r.commanders.map(c => `<tr><td>${cmdLink(c.commander)}</td><td class="n">${c.decks}</td><td class="n muted">${c.games}</td><td class="n">${c.winRate == null ? '—' : pct(c.winRate, 0)}</td><td class="n">${c.cut}</td></tr>`).join('')}
+    </tbody></table></div>
+  <div class="panel"><h2>Torneos recientes</h2>
+    <table><thead><tr><th>Fecha</th><th>Torneo</th><th class="n">Jugadores</th><th class="n">Puesto</th><th>Jugador</th><th>Comandante</th><th class="n">Récord</th><th>Enlace</th><th></th></tr></thead><tbody>${deckRows(r.recent, { withTournament: true })}</tbody></table>
+    <div class="note">El puesto, el top cut y las victorias de torneo dependen de cuántos jugadores había: por eso se comparan con lo que saldría por azar (la suma, torneo a torneo, de cut/jugadores y de 1/jugadores). Un jugador por encima de eso rinde mejor de lo que da la suerte, aunque con pocos torneos sigue pudiendo ser casualidad. Se agrupa por el nombre con el que se inscribe en TopDeck: dos personas con el mismo nombre se juntarían y alguien que usa varios nombres saldría partido.</div>
+  </div><div id="pl-deck"></div>`;
+}
+async function bindPlayers() {
+  const q = $('#pl-q'), box = $('#pl-sug'), out = $('#pl-out');
+  let timer, seq = 0;
+  const show = async (key, label) => {
+    const my = ++seq; box.innerHTML = ''; out.innerHTML = '<div class="panel muted">Cargando…</div>';
+    try {
+      const r = await api('/api/player?key=' + encodeURIComponent(key));
+      if (my !== seq) return;
+      out.innerHTML = playerHtml(r);
+      const dk = out.querySelector('#pl-deck');
+      bindDeckButtons(out, dk); bindCmdLinks(out);
+      view.player = r.name; writeHash();
+    } catch (e) { out.innerHTML = `<div class="panel muted">${esc(e.message)}</div>`; }
+  };
+  playerGo = async name => {
+    q.value = name;
+    try {
+      const r = await api('/api/players?q=' + encodeURIComponent(name));
+      const hit = r.find(x => x.name === name) || r[0];
+      if (hit) show(hit.key, hit.name); else out.innerHTML = '<div class="panel muted">No hay datos de ese jugador con el periodo y filtros actuales.</div>';
+    } catch (e) { out.innerHTML = `<div class="panel muted">${esc(e.message)}</div>`; }
+  };
+  q.oninput = () => {
+    clearTimeout(timer);
+    const v = q.value.trim();
+    if (v.length < 2) { box.innerHTML = ''; return; }
+    timer = setTimeout(async () => {
+      try {
+        const r = await api('/api/players?q=' + encodeURIComponent(v));
+        box.innerHTML = r.length ? r.map(x => `<button type="button" class="sug" data-k="${esc(x.key)}" data-n="${esc(x.name)}"><span class="nm">${esc(x.name)}</span><span class="ct">${x.tournaments} ${x.tournaments === 1 ? 'torneo' : 'torneos'} · ${x.decks} ${x.decks === 1 ? 'mazo' : 'mazos'}${x.cut ? ` · ${x.cut} top cut` : ''}</span></button>`).join('')
+          : '<div class="sug muted">Nadie con ese nombre en este periodo y filtros.</div>';
+        box.querySelectorAll('button').forEach(b => { b.onclick = () => { q.value = b.dataset.n; show(b.dataset.k, b.dataset.n); }; });
+      } catch { box.innerHTML = ''; }
+    }, 200);
+  };
+  q.onkeydown = e => { if (e.key === 'Enter') { const b = box.querySelector('button'); if (b) { e.preventDefault(); b.click(); } } };
+  if (view.player) playerGo(view.player);
+}
+const playersHtml = () => `<div class="panel">
+    <h2>Buscar un jugador</h2>
+    <div class="muted" style="margin-bottom:8px">Escribe el nombre con el que juega en TopDeck para ver sus resultados: winrate, torneos en el top cut, comandantes y listas recientes. También puedes pulsar el nombre de un jugador en cualquier tabla de torneos.</div>
+    <label class="sr" for="pl-q">Nombre del jugador</label>
+    <input type="search" id="pl-q" placeholder="Nombre del jugador…" autocomplete="off">
+    <div id="pl-sug" class="sugs" role="listbox" aria-label="Jugadores"></div>
+  </div><div id="pl-out"></div>`;
+// ---- Jugadores habituales y equipos ----
+async function bindRegulars() {
+  const min = $('#rg-min'), sort = $('#rg-sort'), q = $('#rg-q'), out = $('#rg-out');
+  let timer, seq = 0;
+  const load = async () => {
+    const my = ++seq; out.innerHTML = '<span class="muted">Calculando…</span>';
+    let r;
+    try { r = await api(`/api/regulars?min=${min.value}&sort=${sort.value}&q=${encodeURIComponent(q.value.trim())}`); } catch (e) { out.innerHTML = `<span class="muted">No se pudo cargar: ${esc(e.message)}</span>`; return; }
+    if (my !== seq) return;
+    if (!r.tested) { out.innerHTML = `<span class="muted">Nadie ha jugado ${r.minTournaments} torneos con puesto guardado en este periodo y con estos filtros. Los puestos solo existen para los torneos descargados desde que se guardan (se completan al renovar el seed); prueba con menos torneos o con 6 meses.</span>`; return; }
+    out.innerHTML = `<div class="muted" style="margin-bottom:8px">${r.tested} ${r.tested === 1 ? 'jugador' : 'jugadores'} con al menos ${r.minTournaments} torneos con puesto. Tras corregir por comparaciones múltiples, <b>${r.better}</b> ${r.better === 1 ? 'pasa' : 'pasan'} el top cut más veces de lo que daría el azar de forma clara.</div>
+      ${r.rows.length ? `<table><thead><tr><th>Jugador</th><th class="n">Torneos</th><th class="n" title="Veces en el top cut / las que cabría esperar por azar">Top cut (azar)</th><th class="n" title="Torneos ganados / los esperables por azar">Títulos (azar)</th><th class="n">Winrate</th><th title="q: proporción esperada de falsos positivos tras corregir por mirar a muchos jugadores a la vez">Señal</th></tr></thead><tbody>
+      ${r.rows.map(x => `<tr><td><a href="#" class="plink" data-player="${esc(x.name)}">${esc(x.name)}</a></td><td class="n">${x.tournaments}</td>
+        <td class="n"><b>${x.cut}</b> <span class="muted">(${x.expectedCut.toFixed(1).replace('.', ',')})</span></td><td class="n"><b>${x.titles}</b> <span class="muted">(${x.expectedTitles.toFixed(1).replace('.', ',')})</span></td>
+        <td class="n" title="IC 95 %: ${pct(x.ci[0], 0)}–${pct(x.ci[1], 0)}">${x.winRate == null ? '—' : pct(x.winRate, 0)} <span class="muted">· ${x.games}</span></td>
+        <td>${x.better ? '<span class="rel hi" title="q &lt; 5 %: es poco probable que sea casualidad">● por encima del azar</span>' : '<span class="muted" title="Compatible con la suerte">compatible con el azar</span>'}</td></tr>`).join('')}</tbody></table>
+      <div class="note">${r.total > r.rows.length ? `Se muestran ${r.rows.length} de ${r.total}. ` : ''}</div>` : '<span class="muted">Ningún jugador coincide con la búsqueda.</span>'}`;
+    out.querySelectorAll('.plink').forEach(a => { a.onclick = e => { e.preventDefault(); openPlayer(a.dataset.player); }; });
+  };
+  min.onchange = sort.onchange = load;
+  q.oninput = () => { clearTimeout(timer); timer = setTimeout(load, 250); };
+  load();
+}
+async function bindTeams() {
+  const q = $('#tm-q'), out = $('#tm-out');
+  let timer, seq = 0;
+  const load = async () => {
+    const my = ++seq; out.innerHTML = '<span class="muted">Calculando…</span>';
+    let r;
+    try { r = await api('/api/teams?q=' + encodeURIComponent(q.value.trim())); } catch (e) { out.innerHTML = `<span class="muted">No se pudo cargar: ${esc(e.message)}</span>`; return; }
+    if (my !== seq) return;
+    if (!r.total) { out.innerHTML = `<span class="muted">No hay ninguna etiqueta con al menos ${r.minPlayers} jugadores y ${r.minDecks} mazos en este periodo y con estos filtros.</span>`; return; }
+    out.innerHTML = `<table><thead><tr><th>Etiqueta</th><th class="n">Jugadores</th><th class="n">Mazos</th><th class="n">Torneos</th><th class="n">Winrate</th><th class="n" title="Veces que un jugador del equipo pasó el top cut / las esperables por azar">Top cut (azar)</th><th class="n" title="Torneos ganados por alguien del equipo / los esperables por azar">Títulos (azar)</th><th>Jugadores con más mazos</th></tr></thead><tbody>
+      ${r.rows.map(x => `<tr><td><b>${esc(x.tag)}</b></td><td class="n">${x.players}</td><td class="n">${x.decks}</td><td class="n muted">${x.tournaments}</td>
+        <td class="n" title="IC 95 %: ${pct(x.ci[0], 0)}–${pct(x.ci[1], 0)}">${x.winRate == null ? '—' : pct(x.winRate, 0)} <span class="muted">· ${x.games}</span></td>
+        <td class="n">${x.ranked ? `<b>${x.cut}</b> <span class="muted">(${x.expectedCut.toFixed(1).replace('.', ',')})</span>` : '<span class="muted">—</span>'}</td>
+        <td class="n">${x.ranked ? `<b>${x.titles}</b> <span class="muted">(${x.expectedTitles.toFixed(1).replace('.', ',')})</span>` : '<span class="muted">—</span>'}</td>
+        <td>${x.top.map(p => `<a href="#" class="plink" data-player="${esc(p.name)}">${esc(p.name.replace(/\s*\[[^\]]*\]/, ''))}</a> <span class="muted">${p.decks}</span>`).join(', ')}</td></tr>`).join('')}</tbody></table>
+      <div class="note">Es aproximado: se agrupa por la etiqueta entre corchetes que algunos jugadores añaden a su nombre en TopDeck (por ejemplo «[Pinnacle]»). No todos la usan, algunos la escriben distinta y no siempre es un equipo (puede ser una comunidad o una tienda). Solo salen etiquetas con ${r.minPlayers} jugadores y ${r.minDecks} mazos o más. Cuando varios jugadores de un equipo juegan el mismo torneo, el equipo tiene más opciones de pasar el corte por azar: la columna «azar» lo cuenta por jugador y torneo.</div>`;
+    out.querySelectorAll('.plink').forEach(a => { a.onclick = e => { e.preventDefault(); openPlayer(a.dataset.player); }; });
+  };
+  q.oninput = () => { clearTimeout(timer); timer = setTimeout(load, 250); };
+  load();
+}
+const regularsHtml = () => `<div class="panel">
+    <h2>Jugadores habituales</h2>
+    <div class="muted" style="margin-bottom:8px">Quienes juegan torneos con frecuencia, con cuántas veces han pasado el top cut y ganado un torneo <b>frente a lo que saldría solo por azar</b>. No es un ranking de nivel: con pocos torneos, estar por encima del azar suele ser suerte, por eso se marca como «por encima del azar» solo a quien lo es de forma clara tras corregir por mirar a muchos jugadores a la vez. Se agrupa por el nombre con el que juegan en TopDeck.</div>
+    <div class="tablepick">
+      <label>Mínimo de torneos <select id="rg-min"><option value="3">3</option><option value="5" selected>5</option><option value="8">8</option><option value="12">12</option></select></label>
+      <label>Orden <select id="rg-sort"><option value="tournaments">Más torneos</option><option value="luck">Más por encima del azar</option><option value="winrate">Mejor winrate</option></select></label>
+      <label>Buscar <input type="search" id="rg-q" placeholder="nombre" autocomplete="off"></label>
+    </div>
+    <div id="rg-out" style="margin-top:10px" class="muted">Calculando…</div>
+  </div>`;
+const teamsHtml = () => `<div class="panel">
+    <h2>Equipos y comunidades</h2>
+    <div class="muted" style="margin-bottom:8px">Estadísticas agrupadas por la etiqueta entre corchetes que algunos jugadores llevan en su nombre.</div>
+    <label class="sr" for="tm-q">Buscar una etiqueta</label>
+    <input type="search" id="tm-q" placeholder="Buscar una etiqueta…" autocomplete="off">
+    <div id="tm-out" style="margin-top:10px" class="muted">Calculando…</div>
+  </div>`;
 const loadTorneos = () => subTabs($('#tor-host'), [
   { id: 'torneos', label: 'Torneos', html: torneosHtml(), load: bindTournaments },
   { id: 'listas', label: 'Buscar listas top', html: topDecksHtml(), load: bindTopDecks },
+  { id: 'jugadores', label: 'Jugadores', html: playersHtml(), load: bindPlayers },
+  { id: 'habituales', label: 'Habituales', html: regularsHtml(), load: bindRegulars },
+  { id: 'equipos', label: 'Equipos', html: teamsHtml(), load: bindTeams },
 ]);
 
 function renderList() {
-  view = { t: 'list', tab: view.tab, sub: view.sub, card: view.card }; writeHash();
+  view = { t: 'list', tab: view.tab, sub: view.sub, card: view.card, player: view.player }; writeHash();
   const active = pickTab('list');
   $('#app').innerHTML = tabsHtml('list', active) +
     tabPanel('mazos', active, `
@@ -1225,13 +1442,15 @@ async function openCommander(name, minWith = 5) {
         : '<b>No se distingue de la media</b>: el intervalo (zona sombreada) incluye la media del meta; hacen falta más partidas para decidir.'}
         La línea tenue marca el 25 % del azar puro. ${drawNote()}</div>
     </div>
+    <div class="panel" id="mini6"><div class="muted">Cargando la evolución…</div></div>
     ${tabsHtml('cmd', active)}
     ${tabPanel('cartas', active, `
       <div class="panel">
         <h2>Cartas más jugadas con este comandante</h2>
         <label class="sr" for="cq">Filtrar carta</label>
         <input type="search" id="cq" placeholder="Filtrar carta…">
-        <table style="margin-top:12px"><thead><tr><th>Carta</th><th class="n">Inclusión</th><th class="n">Winrate con ella</th><th class="n">Diferencia</th></tr></thead><tbody id="crows"></tbody></table>
+        <div id="ce-out"></div>
+        <table style="margin-top:12px"><thead><tr><th>Carta</th><th class="n">Inclusión</th><th class="n">Winrate con ella</th><th class="n">Diferencia</th><th></th></tr></thead><tbody id="crows"></tbody></table>
       </div>
       <details class="panel assoc">
         <summary><b>Cartas asociadas a más y a menos winrate</b> <span class="muted">· orientativo: correlación, no causalidad</span></summary>
@@ -1319,11 +1538,14 @@ async function openCommander(name, minWith = 5) {
     $('#crows').innerHTML = r.popular.filter(c => c.card.toLowerCase().includes(q)).slice(0, 150).map(c => `
       <tr><td>${cn(c.card)} ${c.core ? '<span class="tag">core</span>' : ''}</td><td class="n">${pct(c.inclusion, 0)}</td>
       <td class="n">${pct(c.winRateWith)}</td>
-      <td class="n ${c.lift == null ? 'muted' : c.lift >= 0 ? 'pos-t' : 'neg-t'}">${c.lift == null ? '—' : pp(c.lift)}</td></tr>`).join('');
+      <td class="n ${c.lift == null ? 'muted' : c.lift >= 0 ? 'pos-t' : 'neg-t'}">${c.lift == null ? '—' : pp(c.lift)}</td>
+      <td><button type="button" class="ghost" data-evo="${esc(c.card)}" title="Cómo ha evolucionado el winrate con esta carta en los últimos 6 meses">Evolución</button></td></tr>`).join('');
     sortTable($('#crows').closest('table'));
   };
   $('#cq').oninput = drawCards; drawCards();
+  $('#crows').onclick = e => { const b = e.target.closest('[data-evo]'); if (b) loadCardEvo(name, b.dataset.evo); };
   window.scrollTo(0, 0);
+  loadMini(name);
   bindTabs('cmd', {
     resultados: () => { loadMatchups(name); loadTrend(name); },
     torneos: () => loadCommanderTournaments(name),
@@ -1341,6 +1563,131 @@ async function copyText(text, btn) {
 }
 
 // Evolución: winrate (con su intervalo) y presencia en el meta por periodos de 30 días.
+// Resumen de los últimos 6 meses en la cabecera de la ficha: presencia en el meta y winrate, periodo a periodo.
+async function loadMini(name) {
+  const box = $('#mini6');
+  if (!box) return;
+  try {
+    const t = await api(`/api/trend?name=${encodeURIComponent(name)}`, { days: 0 });
+    if (view.name !== name) return;                          // se cambió de comandante mientras cargaba
+    const S = t.series;
+    if (S.length < 2) { box.innerHTML = '<h2>Últimos 6 meses</h2><div class="muted">Aún no hay datos de varios periodos para dibujar la evolución.</div>'; return; }
+    const W = 340, H = 118, L = 34, R = 10, T = 12, B = 22, n = S.length;
+    const X = i => L + i / (n - 1) * (W - L - R);
+    const lab = b => new Date(b.end * 1000).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' });
+    const frame = (lo, hi, fmt) => [lo, (lo + hi) / 2, hi].map(v => { const y = T + (1 - (v - lo) / (hi - lo)) * (H - T - B); return `<line x1="${L}" x2="${W - R}" y1="${y}" y2="${y}" stroke="var(--line)"/><text x="${L - 4}" y="${y + 4}" text-anchor="end">${fmt(v)}</text>`; }).join('') +
+      [0, n - 1].map(i => `<text x="${X(i)}" y="${H - 6}" text-anchor="${i ? 'end' : 'start'}">${lab(S[i])}</text>`).join('');
+    // Presencia
+    const shares = S.map(b => b.metaShare), sMax = Math.max(...shares) * 1.15 || 0.01;
+    const Ys = v => T + (1 - v / sMax) * (H - T - B);
+    const pLine = shares.map((v, i) => (i ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Ys(v).toFixed(1)).join(' ');
+    const pArea = pLine + ` L${X(n - 1)} ${H - B} L${X(0)} ${H - B} Z`;
+    const dS = shares[n - 1] - shares[0];
+    // Winrate
+    const wr = S.filter(b => b.winRate != null);
+    let wrChart = '<div class="muted">Con menos de 10 mazos por periodo el winrate no se dibuja.</div>', wrSum = '';
+    if (wr.length >= 2) {
+      const metas = S.map(b => b.meta).filter(v => v != null);
+      const lo = Math.max(0, Math.min(...metas, ...wr.map(b => b.ci[0])) - .02), hi = Math.min(1, Math.max(...metas, ...wr.map(b => b.ci[1])) + .02);
+      const Yw = v => T + (1 - (v - lo) / (hi - lo)) * (H - T - B);
+      const pts = S.map((b, i) => b.winRate == null ? null : [X(i), Yw(b.winRate)]).filter(Boolean);
+      const ci = S.map((b, i) => b.ci && [X(i), Yw(b.ci[1]), Yw(b.ci[0])]).filter(Boolean);
+      const band = 'M' + ci.map(q => q[0].toFixed(1) + ' ' + q[1].toFixed(1)).join(' L') + ' L' + [...ci].reverse().map(q => q[0].toFixed(1) + ' ' + q[2].toFixed(1)).join(' L') + ' Z';
+      const metaLine = S.map((b, i) => b.meta == null ? null : [X(i), Yw(b.meta)]).filter(Boolean).map((q, i) => (i ? 'L' : 'M') + q[0].toFixed(1) + ' ' + q[1].toFixed(1)).join(' ');
+      const last = wr[wr.length - 1];
+      wrChart = `<svg class="mini" viewBox="0 0 ${W} ${H}" role="img" aria-label="Evolución del winrate en los últimos 6 meses">${frame(lo, hi, v => (v * 100).toFixed(0) + '%')}
+        <path d="${band}" fill="var(--accent)" fill-opacity=".18"/><path d="${metaLine}" fill="none" stroke="var(--ink)" stroke-opacity=".55" stroke-dasharray="4 3"/>
+        <path d="${pts.map((q, i) => (i ? 'L' : 'M') + q[0].toFixed(1) + ' ' + q[1].toFixed(1)).join(' ')}" fill="none" stroke="var(--accent)" stroke-width="2.2"/>
+        ${S.map((b, i) => b.winRate == null ? '' : `<circle cx="${X(i)}" cy="${Yw(b.winRate)}" r="3.2" fill="var(--accent)"><title>Hasta ${lab(b)}: winrate ${pct(b.winRate)} (${b.decks} mazos, ${b.games} partidas)</title></circle>`).join('')}</svg>`;
+      wrSum = `Último periodo: <b>${pct(last.winRate)}</b> <span class="muted">(IC 95 %: ${pct(last.ci[0], 0)}–${pct(last.ci[1], 0)}; media del meta ${last.meta == null ? '—' : pct(last.meta, 0)})</span>`;
+    }
+    // Top cut: % de sus mazos con puesto que pasan el corte, frente a lo que daría el azar
+    const ct = S.filter(b => b.cutRate != null);
+    let cutChart = '<div class="muted">Todavía no hay puestos guardados en suficientes mazos de este comandante (hacen falta al menos 10 por periodo; se completan al renovar el seed).</div>', cutSum = '';
+    if (ct.length >= 2) {
+      const lo = 0, hi = Math.min(1, Math.max(...ct.map(b => b.cutCi[1]), ...S.map(b => b.cutExpected || 0)) + .03);
+      const Yc = v => T + (1 - (v - lo) / (hi - lo)) * (H - T - B);
+      const pts = S.map((b, i) => b.cutRate == null ? null : [X(i), Yc(b.cutRate)]).filter(Boolean);
+      const ci = S.map((b, i) => b.cutCi && b.cutRate != null && [X(i), Yc(b.cutCi[1]), Yc(b.cutCi[0])]).filter(Boolean);
+      const band = 'M' + ci.map(q => q[0].toFixed(1) + ' ' + q[1].toFixed(1)).join(' L') + ' L' + [...ci].reverse().map(q => q[0].toFixed(1) + ' ' + q[2].toFixed(1)).join(' L') + ' Z';
+      const exp = S.map((b, i) => b.cutExpected == null ? null : [X(i), Yc(b.cutExpected)]).filter(Boolean).map((q, i) => (i ? 'L' : 'M') + q[0].toFixed(1) + ' ' + q[1].toFixed(1)).join(' ');
+      const last = ct[ct.length - 1];
+      cutChart = `<svg class="mini" viewBox="0 0 ${W} ${H}" role="img" aria-label="Evolución del porcentaje de mazos que pasan el top cut">${frame(lo, hi, v => (v * 100).toFixed(0) + '%')}
+        <path d="${band}" fill="var(--accent)" fill-opacity=".18"/><path d="${exp}" fill="none" stroke="var(--ink)" stroke-opacity=".55" stroke-dasharray="4 3"/>
+        <path d="${pts.map((q, i) => (i ? 'L' : 'M') + q[0].toFixed(1) + ' ' + q[1].toFixed(1)).join(' ')}" fill="none" stroke="var(--accent)" stroke-width="2.2"/>
+        ${S.map((b, i) => b.cutRate == null ? '' : `<circle cx="${X(i)}" cy="${Yc(b.cutRate)}" r="3.2" fill="var(--accent)"><title>Hasta ${lab(b)}: ${pct(b.cutRate)} pasó el top cut (${Math.round(b.cutRate * b.ranked)} de ${b.ranked} mazos con puesto; el azar daría ${pct(b.cutExpected)})</title></circle>`).join('')}</svg>`;
+      cutSum = `Último periodo: <b>${pct(last.cutRate)}</b> <span class="muted">(IC 95 %: ${pct(last.cutCi[0], 0)}–${pct(last.cutCi[1], 0)}; el azar daría ${last.cutExpected == null ? '—' : pct(last.cutExpected, 0)})</span>`;
+    }
+    box.innerHTML = `<div class="mini-head"><h2 style="margin:0">Últimos 6 meses <span class="muted" style="font-weight:400;font-size:13px">· no depende del periodo elegido</span></h2><button type="button" class="ghost" id="mini-more">Ver el detalle en Resultados</button></div>
+      <div class="mini-grid">
+        <div><div class="mini-t">Presencia en el meta <span class="muted">(% de todos los mazos)</span></div>
+          <svg class="mini" viewBox="0 0 ${W} ${H}" role="img" aria-label="Evolución de la presencia en el meta en los últimos 6 meses">${frame(0, sMax, v => (v * 100).toFixed(v < 0.1 ? 1 : 0) + '%')}
+            <path d="${pArea}" fill="var(--accent)" fill-opacity=".16"/><path d="${pLine}" fill="none" stroke="var(--accent)" stroke-width="2.2"/>
+            ${S.map((b, i) => `<circle cx="${X(i)}" cy="${Ys(b.metaShare)}" r="3.2" fill="var(--accent)"><title>Hasta ${lab(b)}: ${pct(b.metaShare)} del meta (${b.decks} mazos)</title></circle>`).join('')}</svg>
+          <div>${pct(shares[0])} → <b>${pct(shares[n - 1])}</b> <b class="${Math.abs(dS) < 0.002 ? 'muted' : dS > 0 ? 'pos-t' : 'neg-t'}">${pp(dS)}</b></div></div>
+        <div><div class="mini-t">Winrate <span class="muted">(línea discontinua = media del meta; zona = IC 95 %)</span></div>${wrChart}<div>${wrSum}</div></div>
+        <div><div class="mini-t">Pasar el top cut <span class="muted">(% de sus mazos; discontinua = lo que daría el azar)</span></div>${cutChart}<div>${cutSum}</div></div>
+      </div>
+      <div class="note" style="margin-top:8px"><b>Siempre usa los últimos 6 meses</b>, elijas el periodo que elijas arriba.${F.min || F.max ? ' Sí respeta el filtro de jugadores por torneo.' : ''} Cada punto es un periodo de ${t.bucketDays} días, etiquetado con su fecha final. El primero y el último pueden tener pocos mazos y moverse mucho: no leas un cambio pequeño como tendencia.</div>`;
+    $('#mini-more').onclick = () => goTab('resultados');
+  } catch (e) { box.innerHTML = `<h2>Últimos 6 meses</h2><div class="muted">No se pudo cargar la evolución: ${esc(e.message)}</div>`; }
+}
+// Evolución de una carta dentro de un comandante: winrate con y sin ella, y % de mazos que la llevan, en los últimos 6 meses.
+async function loadCardEvo(name, card) {
+  const box = $('#ce-out');
+  box.innerHTML = '<div class="panel muted" style="margin-top:12px">Calculando…</div>';
+  box.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  try {
+    const t = await api(`/api/card-trend?name=${encodeURIComponent(name)}&card=${encodeURIComponent(card)}`, { days: 0 });
+    if (view.name !== name) return;
+    const S = t.series, n = S.length;
+    if (n < 2) { box.innerHTML = '<div class="panel muted" style="margin-top:12px">Aún no hay datos de varios periodos.</div>'; return; }
+    const W = 340, H = 118, L = 34, R = 10, T = 12, B = 22;
+    const X = i => L + i / (n - 1) * (W - L - R);
+    const lab = b => new Date(b.end * 1000).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' });
+    const frame = (lo, hi, fmt) => [lo, (lo + hi) / 2, hi].map(v => { const y = T + (1 - (v - lo) / (hi - lo)) * (H - T - B); return `<line x1="${L}" x2="${W - R}" y1="${y}" y2="${y}" stroke="var(--line)"/><text x="${L - 4}" y="${y + 4}" text-anchor="end">${fmt(v)}</text>`; }).join('') +
+      [0, n - 1].map(i => `<text x="${X(i)}" y="${H - 6}" text-anchor="${i ? 'end' : 'start'}">${lab(S[i])}</text>`).join('');
+    const path = pts => pts.map((q, i) => (i ? 'L' : 'M') + q[0].toFixed(1) + ' ' + q[1].toFixed(1)).join(' ');
+    // Winrate con y sin la carta
+    const vals = S.flatMap(b => [b.winRateWith, b.winRateWithout, ...(b.ciWith || []), ...(b.ciWithout || [])]).filter(v => v != null);
+    const hasW = S.filter(b => b.winRateWith != null).length >= 2;
+    let wrSvg = '<div class="muted">Con menos de ' + t.minDecks + ' mazos con la carta en un periodo no se dibuja su winrate.</div>';
+    if (hasW) {
+      const lo = Math.max(0, Math.min(...vals) - .02), hi = Math.min(1, Math.max(...vals) + .02);
+      const Y = v => T + (1 - (v - lo) / (hi - lo)) * (H - T - B);
+      const ci = S.map((b, i) => b.ciWith && [X(i), Y(b.ciWith[1]), Y(b.ciWith[0])]).filter(Boolean);
+      const band = 'M' + ci.map(q => q[0].toFixed(1) + ' ' + q[1].toFixed(1)).join(' L') + ' L' + [...ci].reverse().map(q => q[0].toFixed(1) + ' ' + q[2].toFixed(1)).join(' L') + ' Z';
+      const withP = S.map((b, i) => b.winRateWith == null ? null : [X(i), Y(b.winRateWith)]).filter(Boolean);
+      const withoutP = S.map((b, i) => b.winRateWithout == null ? null : [X(i), Y(b.winRateWithout)]).filter(Boolean);
+      wrSvg = `<svg class="mini" viewBox="0 0 ${W} ${H}" role="img" aria-label="Winrate con y sin ${esc(card)} por periodos">${frame(lo, hi, v => (v * 100).toFixed(0) + '%')}
+        <path d="${band}" fill="var(--accent)" fill-opacity=".18"/>
+        ${withoutP.length > 1 ? `<path d="${path(withoutP)}" fill="none" stroke="var(--ink)" stroke-opacity=".6" stroke-dasharray="4 3" stroke-width="1.6"/>` : ''}
+        <path d="${path(withP)}" fill="none" stroke="var(--accent)" stroke-width="2.2"/>
+        ${S.map((b, i) => b.winRateWith == null ? '' : `<circle cx="${X(i)}" cy="${Y(b.winRateWith)}" r="3.2" fill="var(--accent)"><title>Hasta ${lab(b)}: con ella ${pct(b.winRateWith)} (${b.withDecks} mazos)${b.winRateWithout == null ? '' : `; sin ella ${pct(b.winRateWithout)} (${b.withoutDecks} mazos)`}</title></circle>`).join('')}</svg>`;
+    }
+    // % de mazos que la llevan
+    const incMax = Math.min(1, Math.max(...S.map(b => b.inclusion)) * 1.15 || 0.05);
+    const Yi = v => T + (1 - v / incMax) * (H - T - B);
+    const incPts = S.map((b, i) => [X(i), Yi(b.inclusion)]);
+    const tot = t.total;
+    const diff = tot.winRateWith != null && tot.winRateWithout != null ? tot.winRateWith - tot.winRateWithout : null;
+    const sepOk = tot.ciWith && tot.ciWithout && (tot.ciWith[0] > tot.ciWithout[1] || tot.ciWith[1] < tot.ciWithout[0]);
+    box.innerHTML = `<div class="panel" style="margin-top:12px">
+      <div class="mini-head"><h2 style="margin:0">${cn(card)} <span class="muted" style="font-weight:400;font-size:13px">· evolución en ${esc(cmdLabel(name))}, últimos 6 meses</span></h2><button type="button" class="ghost" id="ce-close">Cerrar</button></div>
+      <div class="mini-grid">
+        <div><div class="mini-t">Winrate <span class="muted">(línea = con la carta, zona = IC 95 %; discontinua = sin ella)</span></div>${wrSvg}
+          <div>${tot.winRateWith == null ? '' : `Con ella: <b>${pct(tot.winRateWith)}</b> <span class="muted">(${pct(tot.ciWith[0], 0)}–${pct(tot.ciWith[1], 0)}, ${tot.withDecks} mazos)</span>`}</div>
+          <div>${tot.winRateWithout == null ? '' : `Sin ella: <b>${pct(tot.winRateWithout)}</b> <span class="muted">(${pct(tot.ciWithout[0], 0)}–${pct(tot.ciWithout[1], 0)}, ${tot.withoutDecks} mazos)</span>`}</div></div>
+        <div><div class="mini-t">Mazos que la llevan <span class="muted">(% de los mazos del comandante)</span></div>
+          <svg class="mini" viewBox="0 0 ${W} ${H}" role="img" aria-label="Porcentaje de mazos que llevan ${esc(card)} por periodos">${frame(0, incMax, v => (v * 100).toFixed(0) + '%')}
+            <path d="${path(incPts)} L${X(n - 1)} ${H - B} L${X(0)} ${H - B} Z" fill="var(--accent)" fill-opacity=".16"/><path d="${path(incPts)}" fill="none" stroke="var(--accent)" stroke-width="2.2"/>
+            ${S.map((b, i) => `<circle cx="${X(i)}" cy="${Yi(b.inclusion)}" r="3.2" fill="var(--accent)"><title>Hasta ${lab(b)}: ${pct(b.inclusion)} (${b.withDecks} de ${b.decks} mazos)</title></circle>`).join('')}</svg>
+          <div>${pct(S[0].inclusion, 0)} → <b>${pct(S[n - 1].inclusion, 0)}</b></div></div>
+      </div>
+      <div class="note" style="margin-top:8px">${diff == null ? '' : `En los 6 meses, la diferencia entre llevarla y no llevarla es de <b class="${sepOk ? (diff > 0 ? 'pos-t' : 'neg-t') : 'muted'}">${pp(diff)}</b>${sepOk ? '' : ' y no se distingue de la casualidad (los intervalos se solapan)'}. `}<b>Es una correlación, no un efecto de la carta</b>: refleja sobre todo quién la juega y con qué plan, y si su winrate sube o baja en el tiempo no prueba que la carta mejore o empeore el mazo. Cada punto es un periodo de ${t.bucketDays} días; no depende del periodo elegido arriba.</div></div>`;
+    $('#ce-close').onclick = () => { box.innerHTML = ''; };
+  } catch (e) { box.innerHTML = `<div class="panel muted" style="margin-top:12px">No se pudo cargar: ${esc(e.message)}</div>`; }
+}
 async function loadTrend(name) {
   const box = $('#trend');
   try {
@@ -1489,7 +1836,7 @@ async function loadMatchups(name) {
     const maxMu = Math.max(0.02, ...r.rows.map(x => Math.abs(x.lift)));
     box.innerHTML = `
       <div class="muted" style="margin-bottom:8px">Haz clic en un rival para ver qué cartas rinden mejor contra él.</div>
-      <table><thead><tr><th>Rival en la mesa</th><th class="n">Mesas</th><th class="n">Winrate con él</th><th class="n">Sin él</th><th class="n">Diferencia</th><th style="width:110px"></th><th class="n">z</th></tr></thead>
+      <table><thead><tr><th>Rival en la mesa</th><th class="n">Mesas</th><th class="n">Winrate con él</th><th class="n">Sin él</th><th class="n">Diferencia</th><th style="width:110px"></th><th class="n" title="z: cuántas veces mayor es la diferencia que lo que cabría por azar. Cerca de 0 = no se distingue del azar; por encima de 2 o por debajo de −2 es llamativo (solo entonces se colorea). Positivo = mejor con ese rival; negativo = peor.">z</th></tr></thead>
       <tbody>${r.rows.map(x => `
         <tr class="click" data-o="${esc(x.opponent)}"><td>${cn(x.opponent)}</td><td class="n">${x.pods}</td>
         <td class="n">${pct(x.winRate)}</td><td class="n muted">${pct(x.winRateWithout)}</td>
@@ -1504,7 +1851,7 @@ async function loadCardsVs(name, opp) {
   box.innerHTML = '<div class="panel muted">Calculando…</div>';
   try {
     const r = await api(`/api/cards-vs?name=${encodeURIComponent(name)}&vs=${encodeURIComponent(opp)}`);
-    const head = '<thead><tr><th>Carta</th><th class="n">Winrate con ella</th><th class="n">Dif. contra este rival</th><th class="n">Dif. general</th><th class="n">Exceso</th><th style="width:80px"></th><th class="n">z</th></tr></thead>';
+    const head = '<thead><tr><th>Carta</th><th class="n">Winrate con ella</th><th class="n">Dif. contra este rival</th><th class="n">Dif. general</th><th class="n">Exceso</th><th style="width:80px"></th><th class="n" title="z: cuántas veces mayor es la diferencia que lo que cabría por azar. Cerca de 0 = no se distingue del azar; por encima de 2 o por debajo de −2 es llamativo (solo entonces se colorea). Positivo = mejor con ese rival; negativo = peor.">z</th></tr></thead>';
     const empty = '<tr><td class="muted">Sin datos suficientes</td></tr>';
     const maxEx = Math.max(0.02, ...[...r.best, ...r.worst].map(c => Math.abs(c.excess || 0)));
     const row = c => `<tr><td>${cn(c.card)}</td><td class="n">${pct(c.winRateWith)}</td>

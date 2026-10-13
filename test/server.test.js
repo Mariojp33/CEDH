@@ -131,3 +131,18 @@ test('cartas a tener en cuenta por la API', async () => {
   assert.ok(j.decks > 50 && Array.isArray(j.defining) && j.categories.every(c => typeof c.avg === 'number' && Array.isArray(c.cards)));
   assert.strictEqual((await get('/api/threats?name=zzz')).status, 404);
 });
+
+test('todas las respuestas llevan cabeceras de seguridad (CSP sin scripts externos ni en línea)', async () => {
+  for (const p of ['/', '/api/status', '/app.js', '/no-existe']) {
+    const r = await get(p);
+    const h = r.headers;
+    assert.strictEqual(h['x-content-type-options'], 'nosniff', p);
+    assert.strictEqual(h['x-frame-options'], 'DENY', p);
+    assert.ok(h['referrer-policy'], p);
+    const csp = h['content-security-policy'];
+    assert.match(csp, /default-src 'self'/, p);
+    assert.match(csp, /script-src 'self'(;|$)/, p + ': los scripts solo del propio servidor');
+    assert.match(csp, /frame-ancestors 'none'/, p);
+    assert.doesNotMatch(csp, /script-src[^;]*unsafe/, p);
+  }
+});

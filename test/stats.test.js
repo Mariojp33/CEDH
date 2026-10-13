@@ -616,3 +616,46 @@ test('threatProfile: cartas por función frente al meta, y las que definen al ma
   for (const cat of CATEGORIES) assert.strictEqual(new Set(cat.cards).size, cat.cards.length, cat.id + ' tiene cartas repetidas');
   assert.ok(!CATEGORIES.some(c => c.cards.some(x => ['Mana Crypt', 'Jeweled Lotus', 'Dockside Extortionist'].includes(x))));
 });
+
+
+test('trendReport: porcentaje de top cut por periodo, frente al azar, solo con mazos con puesto', () => {
+  const { trendReport } = require('../lib/stats');
+  const now = Math.floor(Date.now() / 1000), day = 86400;
+  const mk = (i, ago, rank, key = 'K') => ({ key, tid: 't' + i, tournament: 'T', date: now - ago * day, size: 20, player: 'p' + i, games: 4, wins: 2, draws: 0, losses: 2, cards: new Set(['A']), seats: [], rank, tc: 4 });
+  const recs = [];
+  // periodo reciente (0-29 días): 12 mazos con puesto, 6 pasan el corte; periodo anterior: 12 con puesto, 3 pasan; otros mazos sin puesto
+  for (let i = 0; i < 12; i++) recs.push(mk(i, 5, i < 6 ? 2 : 15));
+  for (let i = 0; i < 12; i++) recs.push(mk(100 + i, 40, i < 3 ? 2 : 15));
+  for (let i = 0; i < 12; i++) recs.push(mk(200 + i, 70, undefined));
+  for (let i = 0; i < 30; i++) recs.push(mk(300 + i, 5, 9, 'Otro'));
+  const t = trendReport(recs, 'K');
+  const s = t.series;
+  const last = s[s.length - 1], prev = s[s.length - 2], first = s[0];
+  assert.strictEqual(last.ranked, 12);
+  assert.ok(Math.abs(last.cutRate - 0.5) < 1e-9 && Math.abs(prev.cutRate - 0.25) < 1e-9);
+  assert.ok(Math.abs(last.cutExpected - 4 / 20) < 1e-9, 'el azar daría cut/jugadores = 20 %');
+  assert.ok(last.cutCi[0] < last.cutRate && last.cutRate < last.cutCi[1]);
+  assert.strictEqual(first.cutRate, null, 'sin puestos guardados no se calcula');
+});
+
+
+test('cardTrendReport: winrate con y sin la carta y % de mazos que la llevan, por periodos', () => {
+  const { cardTrendReport } = require('../lib/stats');
+  const now = Math.floor(Date.now() / 1000), day = 86400;
+  const mk = (i, ago, withCard, wins) => ({ key: 'K', tid: 't' + i, tournament: 'T', date: now - ago * day, size: 20, player: 'p' + i, games: 4, wins, draws: 0, losses: 4 - wins, cards: new Set(withCard ? ['A', 'X'] : ['A']), seats: [] });
+  const recs = [];
+  // periodo reciente: 20 mazos con X (3 victorias de 4) y 20 sin X (1 de 4); periodo anterior: 5 con X (no se da winrate), 15 sin X
+  for (let i = 0; i < 20; i++) recs.push(mk(i, 5, true, 3), mk(100 + i, 6, false, 1));
+  for (let i = 0; i < 5; i++) recs.push(mk(200 + i, 40, true, 2));
+  for (let i = 0; i < 15; i++) recs.push(mk(300 + i, 41, false, 2));
+  const t = cardTrendReport(recs, 'K', 'X');
+  const last = t.series[t.series.length - 1], prev = t.series[t.series.length - 2];
+  assert.strictEqual(last.withDecks, 20); assert.strictEqual(last.withoutDecks, 20);
+  assert.ok(Math.abs(last.inclusion - 0.5) < 1e-9);
+  assert.ok(Math.abs(last.winRateWith - 0.75) < 1e-9 && Math.abs(last.winRateWithout - 0.25) < 1e-9);
+  assert.ok(last.ciWith[0] < 0.75 && 0.75 < last.ciWith[1]);
+  assert.strictEqual(prev.winRateWith, null, 'con menos de 10 mazos con la carta no se da winrate');
+  assert.ok(prev.winRateWithout != null && Math.abs(prev.inclusion - 0.25) < 1e-9);
+  assert.strictEqual(t.total.withDecks, 25); assert.strictEqual(t.total.withoutDecks, 35);
+  assert.strictEqual(cardTrendReport(recs, 'Nadie', 'X'), null);
+});

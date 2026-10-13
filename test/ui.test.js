@@ -59,8 +59,19 @@ async function scenario(name) {
   // Torneos y listas: podio, top cut, lista con comparación y búsqueda de listas por comandante
   document.getElementById('tab-torneos').click();
   await until(() => document.querySelector('#tr-out table'), 60);
+  const masBtn = document.getElementById('tr-more');
+  const antesFilas = $$('#tr-out tbody tr').length; let tras = antesFilas;
+  if (!masBtn.hidden) { masBtn.click(); await until(() => $$('#tr-out tbody tr').length > antesFilas, 40); tras = $$('#tr-out tbody tr').length; }
+  const so = document.getElementById('tr-sort'); so.value = 'size'; so.dispatchEvent(new Event('change')); await wait(1200);
+  const tams = $$('#tr-out tbody tr').map(tr => +tr.cells[2].textContent);
+  out.paginacion = { antesFilas, tras, hayMas: !masBtn.hidden || tras > antesFilas || antesFilas < 40, ordenadoPorTamano: tams.every((v, i) => i === 0 || tams[i - 1] >= v) };
+  const sd = document.getElementById('tr-sort'); sd.value = 'date'; sd.dispatchEvent(new Event('change')); await wait(1000);
   out.torneos = { apartados: $$('#tor-host [data-sub]').map(b => b.textContent), filas: $$('#tr-out tbody tr').length };
-  document.querySelector('#tr-out [data-tid]').click();
+  // La lista mezcla torneos de demostración (con puestos) y los del seed real del repositorio (sin ellos): se elige uno con puestos
+  const conPuestos = () => $$('#tr-out [data-tid]').find(b => /^Ver top/.test(b.textContent));
+  await until(conPuestos, 40);
+  out.sinPuestos = $$('#tr-out [data-tid]').some(b => /Ver jugadores/.test(b.textContent));
+  conPuestos().click();
   await until(() => document.querySelector('#tr-det table'), 60);
   out.topcut = $$('#tr-det tbody tr').length;
   const tsc = document.getElementById('tt-scope'); tsc.value = 'all'; tsc.dispatchEvent(new Event('change'));
@@ -77,6 +88,25 @@ async function scenario(name) {
   document.querySelector('#dk-views [data-v=tab]').click();
   out.visual.tablaVisible = !document.getElementById('dk-tab').hidden && document.getElementById('dk-img').hidden;
   out.lista = { titulo: (document.querySelector('#tr-deck h2') || {}).textContent, cartas: $$('#tr-deck tbody tr').length, copiar: !!document.getElementById('dk-copy'), distinta: /Qué tiene de distinta/.test(document.getElementById('tr-deck').textContent) };
+  // Jugadores: desde el nombre en una tabla se abre su perfil
+  const nombre = document.querySelector('#tr-det .plink'); const nombreTxt = nombre.textContent;
+  nombre.click();
+  await until(() => document.querySelector('#pl-out .tile'), 60);
+  out.jugador = { subtab: (document.querySelector('#tor-host [data-sub].on') || {}).textContent, titulo: (document.querySelector('#pl-out h2') || {}).textContent, nombreTxt, tiles: $$('#pl-out .tile').length, comandantes: $$('#pl-out table')[0] ? $$('#pl-out table')[0].tBodies[0].rows.length : 0, hash: decodeURIComponent(location.hash) };
+  const pq = document.getElementById('pl-q'); pq.value = nombreTxt.slice(0, 5); pq.dispatchEvent(new Event('input'));
+  await until(() => document.querySelector('#pl-sug button'), 40);
+  out.jugador.sugerencias = $$('#pl-sug button').length;
+  out.jugador.paneles = $$('#pl-out h2').map(h => h.textContent);
+  // Habituales y equipos
+  document.querySelector('#tor-host [data-sub=habituales]').click();
+  await until(() => document.querySelector('#rg-out table'), 60);
+  const rg = $$('#rg-out tbody tr');
+  const sortRg = document.getElementById('rg-sort'); sortRg.value = 'winrate'; sortRg.dispatchEvent(new Event('change')); await wait(1500);
+  const wrsRg = $$('#rg-out tbody tr').map(tr => parseFloat(tr.cells[4].textContent));
+  out.habituales = { filas: rg.length, ordenWinrate: wrsRg.every((v, i) => i === 0 || wrsRg[i - 1] >= v), resumen: /con al menos 5 torneos con puesto/.test(document.getElementById('rg-out').textContent) };
+  document.querySelector('#tor-host [data-sub=equipos]').click();
+  await until(() => document.querySelector('#tm-out table'), 60);
+  out.equipos = { filas: $$('#tm-out tbody tr').length, etiquetas: $$('#tm-out tbody tr').map(tr => tr.cells[0].textContent) };
   document.querySelector('#tor-host [data-sub=listas]').click();
   await until(() => document.querySelector('#td-out table'), 60);
   out.listasTop = $$('#td-out tbody tr').length;
@@ -112,6 +142,23 @@ async function scenario(name) {
   out.juega = !!document.querySelector('#variants .variant');
   document.getElementById('tab-resultados').click(); await until(() => document.querySelector('#mu table') && document.querySelector('#trend svg'), 120);
   out.resultados = { matchups: !!document.querySelector('#mu table'), evolucion: !!document.querySelector('#trend svg') };
+  await until(() => document.querySelector('#mini6 svg.mini'), 60);
+  out.mini = { titulos: $$('#mini6 .mini-t').map(t => t.textContent), graficas: $$('#mini6 svg.mini').length, titulo: (document.querySelector('#mini6 h2') || {}).textContent, resumen: (document.getElementById('mini6').textContent.match(/→/g) || []).length };
+  // La evolución de 6 meses no depende del periodo elegido en los filtros: con «1 mes» sigue habiendo los mismos puntos
+  const puntos6 = () => $$('#mini6 svg.mini')[0].querySelectorAll('circle').length;
+  const antes6 = puntos6();
+  document.querySelector('#period [data-d="30"]').click(); await wait(1800);
+  await until(() => document.querySelector('#mini6 svg.mini'), 60);
+  out.mini.puntosConUnMes = puntos6(); out.mini.puntosAntes = antes6; out.mini.aviso = /Siempre usa los últimos 6 meses/.test(document.getElementById('mini6').textContent);
+  document.querySelector('#period [data-d="90"]').click(); await wait(1500);
+  await until(() => document.querySelector('.head h2') || document.querySelector('#mini6'), 60);
+  // Evolución de una carta dentro del comandante
+  await until(() => document.querySelector('#crows [data-evo]'), 40);
+  document.querySelector('#crows [data-evo]').click();
+  await until(() => document.querySelector('#ce-out svg.mini'), 60);
+  out.evo = { graficas: $$('#ce-out svg.mini').length, texto: /Es una correlación, no un efecto de la carta/.test(document.getElementById('ce-out').textContent), cerrar: !!document.getElementById('ce-close') };
+  document.getElementById('ce-close').click();
+  out.evo.cerrado = document.getElementById('ce-out').innerHTML === '';
   // Torneos del comandante: lista, filtros y paginación
   document.getElementById('tab-torneos').click(); await until(() => document.querySelector('#ct-out table'), 60);
   const todas = $$('#ct-out tbody tr').length, resumen = document.getElementById('ct-sum').textContent;
@@ -145,7 +192,7 @@ async function scenario(name) {
 (async () => {
   const name = new URLSearchParams(location.search).get('s') || 'main';
   let out;
-  try { out = await scenario(name); } catch (e) { out = { error: String(e) }; }
+  try { out = await scenario(name); } catch (e) { out = { error: String(e) + ' @ ' + String(e.stack || '').split('\n').slice(0, 3).join(' | ') }; }
   out.errs = errs;
   const pre = document.createElement('pre'); pre.id = 'result'; pre.textContent = JSON.stringify(out); document.body.appendChild(pre);
 })();
@@ -209,7 +256,11 @@ test('interfaz: recorrido por secciones, buscador único, ficha y «Revisar mi l
   assert.deepStrictEqual(r.meta.apartados, ['Panorama', 'Novedades de cartas']);
   assert.ok(r.meta.niveles >= 3 && /t=meta&s=panorama/.test(r.meta.hash.replace(/&amp;/g, '&')));
   assert.ok(r.novedades.cargado && /s=novedades/.test(r.novedades.hash));
-  assert.deepStrictEqual(r.torneos.apartados, ['Torneos', 'Buscar listas top']);
+  assert.deepStrictEqual(r.torneos.apartados, ['Torneos', 'Buscar listas top', 'Jugadores', 'Habituales', 'Equipos']);
+  assert.ok(r.habituales.filas > 5 && r.habituales.ordenWinrate && r.habituales.resumen, 'jugadores habituales con orden');
+  assert.ok(r.equipos.filas >= 1 && r.equipos.etiquetas.some(t => /^Equipo \d$/.test(t)), 'equipos por etiqueta: ' + r.equipos.etiquetas.slice(0, 5));
+  assert.strictEqual(r.jugador.subtab, 'Jugadores'); assert.strictEqual(r.jugador.titulo.replace(/\s*\[.*?\]/g, '').trim().toLowerCase(), r.jugador.nombreTxt.replace(/\s*\[.*?\]/g, '').trim().toLowerCase());
+  assert.ok(r.jugador.tiles >= 2 && r.jugador.comandantes >= 1 && r.jugador.sugerencias >= 1 && /p=/.test(r.jugador.hash), 'perfil de jugador con estadísticas, comandantes, sugerencias y enlace');
   assert.ok(r.torneos.filas > 5 && r.topcut >= 4, 'torneos con su top cut');
   assert.ok(r.torneoTodos.todos > r.topcut && r.torneoTodos.ordenadoPorWr, 'el torneo se puede ver completo y ordenar por resultados');
   assert.ok(r.colEnlace, 'la tabla del top cut tiene columna de enlace a la lista');
@@ -229,6 +280,12 @@ test('interfaz: recorrido por secciones, buscador único, ficha y «Revisar mi l
   assert.strictEqual(r.ficha.sinMapa, true, 'el mapa de cartas ya no está');
   assert.strictEqual(r.ficha.asociadasPlegadas, true, 'las cartas asociadas al winrate van plegadas');
   assert.ok(r.ficha.cartasMasJugadas > 20);
+  assert.ok(r.sinPuestos, 'los torneos sin puestos guardados también salen en la lista');
+  assert.ok(r.paginacion.ordenadoPorTamano && r.paginacion.tras >= r.paginacion.antesFilas, 'la lista de torneos se ordena por tamaño y se puede ampliar');
+  assert.ok(r.mini.titulos.some(t => /top cut/i.test(t)), 'la cabecera incluye la gráfica de top cut');
+  assert.ok(r.mini.graficas === 3 && /Últimos 6 meses/.test(r.mini.titulo) && r.mini.resumen >= 1, 'la ficha enseña la evolución de presencia y winrate en la cabecera');
+  assert.ok(r.mini.puntosAntes >= 5 && r.mini.puntosConUnMes === r.mini.puntosAntes && r.mini.aviso, 'la evolución de 6 meses no cambia al elegir «1 mes»: ' + [r.mini.puntosAntes, r.mini.puntosConUnMes]);
+  assert.ok(r.evo.graficas >= 1 && r.evo.texto && r.evo.cerrar && r.evo.cerrado, 'evolución de una carta dentro del comandante, con aviso de correlación');
   assert.ok(r.torneosCmd.todas > 5 && /torneos/.test(r.torneosCmd.resumen) && r.torneosCmd.campeones > 0 && r.torneosCmd.soloGanadores && r.torneosCmd.conPorcentaje && r.torneosCmd.colJugadores && r.torneosCmd.vacio, 'torneos del comandante con filtros');
   assert.ok(r.juega && r.resultados.matchups && r.resultados.evolucion);
   assert.match(r.listaVacia, /Pega primero/);
