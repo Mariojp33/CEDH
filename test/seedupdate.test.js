@@ -93,3 +93,24 @@ test('updateSeed: si el seed cubre menos días de los pedidos, descarga todo el 
     assert.strictEqual(JSON.parse(fs.readFileSync(file, 'utf8')).days, 180);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('updateSeed: si el seed tiene mazos sin posición final, descarga todo el periodo una vez', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cedh-seed-'));
+  try {
+    const now = Date.now();
+    const file = path.join(dir, 'records.json');
+    const recs = buildRecords(mockTournaments());
+    for (const r of recs) delete r.rank;              // seed anterior al dato de posición
+    cache.writeStream(fs, file, { updatedAt: new Date(now - 2 * 86400000).toISOString(), days: 180 }, recs);
+    let asked = null;
+    const fakeFetch = async opts => { asked = opts; await opts.onBatch(mockTournaments()); };
+    await updateSeed({ file, apiKey: 'k', fetchTournaments: fakeFetch, now, log: () => {} });
+    assert.strictEqual(asked.days, 180, 'periodo completo y no solo los 4 días desde la última vez');
+    const after = cache.decodeAny(JSON.parse(fs.readFileSync(file, 'utf8')));
+    assert.ok(after.length > 0 && after.every(r => r.rank), 'todos los mazos del seed nuevo tienen posición');
+    // con todo ya con posición, la siguiente vez vuelve a ser incremental
+    asked = null;
+    await updateSeed({ file, apiKey: 'k', fetchTournaments: async o => { asked = o; await o.onBatch([]); }, now, log: () => {}, minKeep: 0 });
+    assert.ok(asked.days < 10);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

@@ -23,6 +23,7 @@ const api = async (p, o = {}) => {
 };
 
 let commanders = [];
+const MIN_TABLE = 5;   // la tabla de «Mazos» oculta por defecto los comandantes con menos mazos que esto
 
 // ¿El intervalo de confianza queda entero por encima (1) o por debajo (-1) de la referencia, o la incluye (0)?
 const sig = (ci, base) => ci[0] > base ? 1 : ci[1] < base ? -1 : 0;
@@ -44,6 +45,16 @@ function placePop() {
   if (x + w > innerWidth - 8) x = Math.max(8, mouse.x - w - m);          // sin sitio a la derecha: a la izquierda
   if (y + h > innerHeight - 8) y = Math.max(8, innerHeight - h - 8);      // sin sitio abajo: se sube
   pop.style.left = x + 'px'; pop.style.top = y + 'px';
+}
+// Imagen de una carta (Scryfall) con reintento aproximado para caras dobles o divididas; si no existe, un aviso.
+function cardImage(n) {
+  const img = new Image();
+  img.alt = n; img.loading = 'lazy'; img.src = scry(n);
+  img.onerror = () => {
+    if (!img.dataset.retry) { img.dataset.retry = 1; img.src = scry(n, 'fuzzy'); return; }
+    const d = document.createElement('div'); d.className = 'miss'; d.textContent = 'Imagen no disponible'; img.replaceWith(d);
+  };
+  return img;
 }
 function showPop(name) {
   pop.replaceChildren(...name.split(' / ').slice(0, 2).map(n => {
@@ -118,6 +129,7 @@ function writeHash() {
   if (F.min) h.set('min', F.min);
   if (F.max) h.set('max', F.max);
   if (view.tab) h.set('t', view.tab);
+  if (view.sub && SUBTAB_OWNERS.has(view.tab)) h.set('s', view.sub);
   if (view.t === 'list' && view.card && view.tab === 'cartas') h.set('card', view.card);
   if (view.t === 'cmd') h.set('c', view.name);
   if (view.t === 'cmp') { h.set('c', view.a); h.set('vs', view.b); }
@@ -133,7 +145,7 @@ function readHash() {
   const tab = h.get('t') || undefined;
   if (h.get('c') && h.get('vs')) view = { t: 'cmp', a: h.get('c'), b: h.get('vs') };
   else if (h.get('c')) view = { t: 'cmd', name: h.get('c'), minWith: 5, tab };
-  else view = { t: 'list', tab, card: h.get('card') || undefined };
+  else view = { t: 'list', tab, sub: h.get('s') || undefined, card: h.get('card') || undefined };
 }
 const store = {
   get: k => { try { return localStorage.getItem(k) || ''; } catch { return ''; } },
@@ -142,10 +154,20 @@ const store = {
 // ---- Pestañas ----
 // Cada pestaña carga sus datos la primera vez que se abre (así no se calculan sinergias o variantes si nadie las mira).
 const TABS = {
-  list: [['comandantes', 'Comandantes'], ['meta', 'Meta del momento'], ['novedades', 'Novedades'], ['mesa', 'Preparar mesa'], ['cartas', 'Buscar carta'], ['matriz', 'Matriz de matchups'], ['fiabilidad', 'Fiabilidad del método']],
-  cmd: [['cartas', 'Cartas'], ['matchups', 'Matchups'], ['evolucion', 'Evolución'], ['variantes', 'Variantes y paquetes'], ['combos', 'Combos y amenazas'], ['lista', 'Mi lista']],
+  list: [['mazos', 'Mazos'], ['meta', 'Meta'], ['torneos', 'Torneos y listas'], ['mesa', 'Preparar mesa'], ['lista', 'Revisar mi lista'], ['cartas', 'Buscar carta'], ['mas', 'Más']],
+  cmd: [['cartas', 'Cartas'], ['juega', 'Cómo juega'], ['combos', 'Combos y amenazas'], ['resultados', 'Resultados'], ['torneos', 'Torneos'], ['lista', 'Mi lista']],
 };
-const pickTab = kind => TABS[kind].some(t => t[0] === view.tab) ? view.tab : TABS[kind][0][0];
+// Enlaces de versiones anteriores: pestaña antigua -> [pestaña actual, apartado]
+const ALIAS = {
+  list: { comandantes: ['mazos'], novedades: ['meta', 'novedades'], matriz: ['mas', 'matriz'], fiabilidad: ['mas', 'fiabilidad'] },
+  cmd: { variantes: ['juega'], matchups: ['resultados'], evolucion: ['resultados'] },
+};
+const SUBTAB_OWNERS = new Set(['meta', 'torneos', 'mas']);   // pestañas con apartados internos (el apartado va en la dirección)
+const pickTab = kind => {
+  const al = (ALIAS[kind] || {})[view.tab];
+  if (al) { view.tab = al[0]; if (al[1] && !view.sub) view.sub = al[1]; }
+  return TABS[kind].some(t => t[0] === view.tab) ? view.tab : TABS[kind][0][0];
+};
 const tabsHtml = (kind, active) => `<div class="tabs" role="tablist" aria-label="Secciones">${TABS[kind].map(([id, label]) =>
   `<button role="tab" id="tab-${id}" aria-controls="panel-${id}" aria-selected="${id === active}" tabindex="${id === active ? 0 : -1}" data-tab="${id}">${label}</button>`).join('')}</div>`;
 const tabPanel = (id, active, inner) => `<section class="tabpanel" role="tabpanel" id="panel-${id}" aria-labelledby="tab-${id}" ${id === active ? '' : 'hidden'}>${inner}</section>`;
@@ -172,50 +194,12 @@ function bindTabs(kind, loaders) {
   select(pickTab(kind));
 }
 
-async function ensureCommanders() { if (!commanders.length) commanders = await api('/api/commanders?min=5'); }
+async function ensureCommanders() { if (!commanders.length) commanders = await api('/api/commanders?min=1'); }
 
 // Fiabilidad según q (proporción esperada de falsos positivos tras corregir por comparaciones múltiples).
 const rel = q => q == null ? '' : q < 0.05 ? '<span class="rel hi" title="q &lt; 5 %: es poco probable que sea casualidad">● alta</span>'
   : q < 0.25 ? '<span class="rel mid" title="q &lt; 25 %: indicio razonable">◐ media</span>'
   : '<span class="rel lo" title="Puede ser casualidad">○ baja</span>';
-
-// Gráfico: inclusión (x) frente a diferencia ajustada de winrate (y).
-function scatter(cards) {
-  const pts = cards.filter(c => c.adj != null);
-  if (pts.length < 5) return '<div class="muted">Sin datos suficientes para el gráfico.</div>';
-  const W = 720, H = 380, L = 46, R = 12, T = 14, B = 34;
-  const xmax = Math.min(1, Math.max(0.3, ...pts.map(c => c.inclusion)) + 0.03);
-  const ymax = Math.max(0.01, ...pts.map(c => Math.abs(c.adj))) * 1.15;
-  const X = v => L + v / xmax * (W - L - R), Y = v => T + (1 - (v + ymax) / (2 * ymax)) * (H - T - B);
-  const rad = c => 3 + Math.min(7, Math.sqrt(c.decks) / 2.2);
-  const xTicks = [0, .2, .4, .6, .8, 1].filter(v => v <= xmax);
-  const yStep = ymax > 0.06 ? 0.04 : 0.02;
-  const yTicks = []; for (let v = -Math.floor(ymax / yStep) * yStep; v <= ymax; v += yStep) yTicks.push(Math.round(v * 1000) / 1000);
-  const labelled = new Set([...pts].filter(c => c.q < 0.25).sort((a, b) => Math.abs(b.adj) - Math.abs(a.adj)).slice(0, 12));
-  const dots = pts.map(c => `<circle data-card="${esc(c.card)}" cx="${X(c.inclusion).toFixed(1)}" cy="${Y(c.adj).toFixed(1)}" r="${rad(c).toFixed(1)}"
-      fill="var(${c.adj >= 0 ? '--good' : '--bad'})" fill-opacity="${c.q < 0.25 ? 0.85 : 0.3}" stroke="var(--panel)" stroke-width="1">
-      <title>${esc(c.card)}\nEn ${c.decks} mazos (${pct(c.inclusion, 0)})\nDiferencia ajustada ${pp(c.adj)} (bruta ${pp(c.lift)})</title></circle>`).join('');
-  const placed = [];
-  const labels = [...labelled].map(c => {
-    const t = short(c.card, 22), w = t.length * 5.6, cx = X(c.inclusion), cy = Y(c.adj) + 3;
-    const left = cx + rad(c) + 3 + w > W - R;
-    const x0 = left ? cx - rad(c) - 3 - w : cx + rad(c) + 3;
-    if (placed.some(b => Math.abs(b.y - cy) < 12 && x0 < b.x + b.w && b.x < x0 + w)) return ''; // se solaparía con otra etiqueta
-    placed.push({ x: x0, y: cy, w });
-    return `<text class="pl" data-card="${esc(c.card)}" x="${(left ? cx - rad(c) - 3 : x0).toFixed(1)}" y="${cy.toFixed(1)}" ${left ? 'text-anchor="end"' : ''}>${esc(t)}</text>`;
-  }).join('');
-  return `<svg class="scatter" viewBox="0 0 ${W} ${H}" role="img" aria-label="Inclusión frente a diferencia de winrate por carta">
-    ${yTicks.map(v => `<line x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--line)" ${v === 0 ? 'stroke-width="2"' : ''}/><text x="${L - 6}" y="${Y(v) + 4}" text-anchor="end">${v > 0 ? '+' : ''}${(v * 100).toFixed(0)}</text>`).join('')}
-    ${xTicks.map(v => `<text x="${X(v)}" y="${H - 14}" text-anchor="middle">${(v * 100).toFixed(0)} %</text>`).join('')}
-    <line x1="${X(0.4)}" x2="${X(0.4)}" y1="${T}" y2="${H - B}" stroke="var(--line)" stroke-dasharray="4 4"/>
-    <text class="q" x="${W - R - 4}" y="${T + 12}" text-anchor="end">Estándar que funciona</text>
-    <text class="q" x="${L + 6}" y="${T + 12}">Tech infrautilizada</text>
-    <text class="q" x="${W - R - 4}" y="${H - B - 6}" text-anchor="end">Posibles trampas</text>
-    <text class="q" x="${L + 6}" y="${H - B - 6}">Poco jugadas y flojas</text>
-    <text x="${(L + W - R) / 2}" y="${H - 1}" text-anchor="middle">% de mazos que la juegan →</text>
-    <text x="12" y="${(T + H - B) / 2}" text-anchor="middle" transform="rotate(-90 12 ${(T + H - B) / 2})">diferencia ajustada de winrate (pts)</text>
-    ${dots}${labels}</svg>`;
-}
 
 // Panel «Mi lista»: la lista pegada se compara con lo que juega el meta con este comandante.
 function bindMyList(name) {
@@ -324,7 +308,7 @@ async function show() {
     try { return await openCompare(view.a, view.b); }
     catch { view = { t: 'list' }; }
   }
-  commanders = await api('/api/commanders?min=5');
+  commanders = await api('/api/commanders?min=1'); // todos los comandantes con algún mazo: buscadores y desplegables los usan todos
   renderList();
 }
 
@@ -335,7 +319,7 @@ async function boot() {
 }
 
 function bindFilters() {
-  const apply = () => { F.min = $('#fmin').value; F.max = $('#fmax').value; show().catch(e => { $('#status').textContent = 'Error: ' + e.message; }); };
+  const apply = () => { F.min = $('#fmin').value; F.max = $('#fmax').value; updateFilterSummary(); show().catch(e => { $('#status').textContent = 'Error: ' + e.message; }); };
   $('#fmin').onchange = apply; $('#fmax').onchange = apply;
   const seg = () => {
     document.querySelectorAll('#period button').forEach(b => { const on = Number(b.dataset.d) === F.days; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); });
@@ -647,6 +631,7 @@ async function searchCard(name) {
     const per = { 30: 'último mes', 90: 'últimos 3 meses', 180: 'últimos 6 meses' }[F.days] || `últimos ${F.days} días`;
     out.innerHTML = `
       <div class="panel">
+        <div class="cardfig" id="cs-img"></div>
         <h2 style="font-size:20px">${cn(r.card)}</h2>
         <div>Se juega en <b>${r.decks}</b> de ${r.total} mazos cEDH (<b>${pct(r.share)}</b>) · ${per}</div>
         ${isNew ? `<div class="muted">Aparece por primera vez en los datos el ${day(r.firstSeen)}: es una carta reciente en el meta.</div>` : ''}
@@ -670,6 +655,7 @@ async function searchCard(name) {
           <tbody>${r.together.map(c => `<tr><td>${cn(c.card)}</td><td class="n">${pct(c.withCard, 0)}</td><td class="n muted">${pct(c.overall, 0)}</td></tr>`).join('')}</tbody></table>`
           : '<div class="muted">No hay cartas que la acompañen de forma destacada.</div>'}</div>
       </div>`;
+    $('#cs-img').appendChild(cardImage(r.card));
     // Alternativas: solo si hay comandantes donde la carta no la lleven todos
     const eligible = r.commanders.filter(c => c.decks >= 25 && c.of - c.decks >= 25).slice(0, 10);
     out.insertAdjacentHTML('beforeend', `<div class="panel"><h2>¿Qué juegan en su lugar?</h2>${eligible.length
@@ -689,26 +675,431 @@ async function searchCard(name) {
   } catch (e) { out.innerHTML = `<div class="panel muted">${esc(e.message)}</div>`; }
 }
 
+// ---- Apartados dentro de una pestaña (Meta: panorama/novedades; Más: guía/matriz/fiabilidad) ----
+function subTabs(host, items) {
+  const ids = items.map(i => i.id);
+  host.innerHTML = `<div class="subtabs" role="tablist" aria-label="Apartados">${items.map(i => `<button type="button" role="tab" data-sub="${i.id}" aria-selected="false" tabindex="-1">${i.label}</button>`).join('')}</div>` +
+    items.map(i => `<div class="subpanel" role="tabpanel" data-subpanel="${i.id}" hidden>${i.html}</div>`).join('');
+  const done = new Set();
+  const select = (id, focus) => {
+    view.sub = id; writeHash();
+    host.querySelectorAll('[data-sub]').forEach(b => { const on = b.dataset.sub === id; b.setAttribute('aria-selected', on); b.tabIndex = on ? 0 : -1; b.classList.toggle('on', on); if (on && focus) b.focus(); });
+    host.querySelectorAll('[data-subpanel]').forEach(p => { p.hidden = p.dataset.subpanel !== id; });
+    if (!done.has(id)) { done.add(id); const it = items.find(i => i.id === id); if (it && it.load) it.load(); }
+  };
+  host.querySelectorAll('[data-sub]').forEach(b => {
+    b.onclick = () => select(b.dataset.sub);
+    b.onkeydown = e => {
+      const i = ids.indexOf(b.dataset.sub);
+      const to = { ArrowRight: ids[(i + 1) % ids.length], ArrowLeft: ids[(i + ids.length - 1) % ids.length] }[e.key];
+      if (to) { e.preventDefault(); select(to, true); }
+    };
+  });
+  select(ids.includes(view.sub) ? view.sub : ids[0]);
+}
+const goTab = id => { const b = $('#tab-' + id); if (b) b.click(); };
+
+const guideHtml = () => `<div class="panel guide">
+  <h2>Cómo leer esta web</h2>
+  <h3>De dónde salen los datos</h3>
+  <p>Torneos del formato EDH de <a href="https://topdeck.gg" target="_blank" rel="noopener">TopDeck.gg</a> de los últimos seis meses. Solo se usan los que parecen cEDH: los casuales, de precons, de presupuesto o brawl se descartan por el contenido de sus mazos, no por el nombre. Los datos se actualizan solos.</p>
+  <h3>Winrate, «pts» y la media del meta</h3>
+  <p>El winrate es victorias entre partidas jugadas. Se compara con la <b>media del meta</b> del periodo elegido, no con el 25 % teórico de una mesa de 4, porque los empates (en torno a una de cada cinco partidas) hacen que la media real quede por debajo. Una diferencia de «+3 pts» son tres puntos porcentuales: un 28 % frente a una media del 25 %.</p>
+  <h3>Empates</h3>
+  <p>Por defecto las partidas empatadas no cuentan (winrate = victorias ÷ victorias + derrotas) y la referencia ronda el 25 %. Puedes cambiarlo en los filtros para que cuenten como no ganadas. La tasa de empates se muestra aparte: es una característica estable de cada comandante.</p>
+  <h3>Intervalos y colores</h3>
+  <p>Cada winrate tiene un intervalo de confianza del 95 %. Solo se pinta de verde o rojo cuando ese intervalo queda entero por encima o por debajo de la media; en <b>gris</b> no se distingue de ella, normalmente por falta de partidas. Los niveles S-D de «Meta» salen de ese mismo intervalo, así que un mazo con pocas partidas no sube por suerte.</p>
+  <h3>Lo que esta web no prueba</h3>
+  <p>El winrate asociado a una carta o a un combo es una <b>correlación, no una mejora demostrada</b>: refleja sobre todo quién juega la carta y con qué plan. Lo comprobamos con cambios reales de lista de los mismos jugadores y no se confirmó, por eso las recomendaciones de «Revisar mi lista» se basan en lo que juegan listas parecidas y no en el winrate de cada carta. En «Fiabilidad del método» ves qué parte de las conclusiones se mantiene en datos nuevos.</p>
+  <h3>Combos y cartas por función</h3>
+  <p>Los combos vienen de <a href="https://commanderspellbook.com" target="_blank" rel="noopener">Commander Spellbook</a> y se cruzan con los mazos para ver cuáles se juegan de verdad. Recogen combos infinitos y de victoria, no remates por valor ni victorias sin combo: «sin combo detectado» no significa inofensivo. Las listas de remates, interacción, tutores, maná rápido y odio son de criterio y se editan a mano.</p>
+  <h3>Matchups</h3>
+  <p>Son históricos, no predicciones. Cambiar de rival cambia también a quién más te sientas, y las mesas de un mismo torneo no son independientes. En cEDH suelen ser casi planos.</p>
+</div>`;
+
+// ---- Buscador único de la cabecera: comandantes y cartas ----
+function bindGlobalSearch() {
+  const q = $('#gq'), box = $('#gs');
+  let timer = null, items = [];
+  const close = () => { box.hidden = true; box.innerHTML = ''; items = []; q.setAttribute('aria-expanded', 'false'); };
+  const pick = it => {
+    close(); q.value = '';
+    if (it.type === 'cmd') { view = { t: 'cmd', name: it.name, minWith: 5 }; openCommander(it.name); }
+    else ensureCommanders().then(() => { view = { t: 'list', tab: 'cartas', card: it.name }; renderList(); });
+  };
+  const render = () => {
+    const part = (type, title) => { const rows = items.map((it, i) => ({ it, i })).filter(x => x.it.type === type); return rows.length ? `<div class="gh">${title}</div>` + rows.map(({ it, i }) => `<button type="button" role="option" data-i="${i}"><span>${esc(it.label)}</span><span class="ex">${esc(it.extra)}</span></button>`).join('') : ''; };
+    box.innerHTML = part('cmd', 'Comandantes') + part('card', 'Cartas') || '<div class="gh">Sin resultados</div>';
+    box.hidden = false; q.setAttribute('aria-expanded', 'true');
+  };
+  q.oninput = () => {
+    clearTimeout(timer);
+    const v = q.value.trim();
+    if (v.length < 2) return close();
+    timer = setTimeout(async () => {
+      await ensureCommanders();
+      const lc = v.toLowerCase();
+      const cm = commanders.filter(c => c.commander.toLowerCase().includes(lc)).slice(0, 5).map(c => ({ type: 'cmd', name: c.commander, label: cmdLabel(c.commander), extra: `${c.decks} mazos` }));
+      let cards = [];
+      try { cards = (await api('/api/cards?q=' + encodeURIComponent(v))).slice(0, 6).map(x => ({ type: 'card', name: x.card, label: x.card, extra: `${x.decks.toLocaleString('es-ES')} mazos` })); } catch { /* el buscador de cartas puede estar preparándose */ }
+      if (q.value.trim() !== v) return;                    // se siguió escribiendo: este resultado ya no vale
+      items = [...cm, ...cards]; render();
+    }, 160);
+  };
+  q.onkeydown = e => {
+    if (e.key === 'Enter' && items[0]) { e.preventDefault(); pick(items[0]); }
+    else if (e.key === 'Escape') close();
+    else if (e.key === 'ArrowDown') { const b = box.querySelector('button'); if (b) { e.preventDefault(); b.focus(); } }
+  };
+  box.onkeydown = e => {
+    const bs = [...box.querySelectorAll('button')], i = bs.indexOf(document.activeElement);
+    if (e.key === 'ArrowDown' && i < bs.length - 1) { e.preventDefault(); bs[i + 1].focus(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); (i > 0 ? bs[i - 1] : q).focus(); }
+    else if (e.key === 'Escape') { close(); q.focus(); }
+  };
+  box.onclick = e => { const b = e.target.closest('[data-i]'); if (b) pick(items[Number(b.dataset.i)]); };
+  document.addEventListener('click', e => { if (!e.target.closest('.gsearch')) close(); });
+}
+
+// ---- Filtros plegables: el resumen siempre dice qué hay elegido ----
+function updateFilterSummary() {
+  const per = { 30: '1 mes', 90: '3 meses', 180: '6 meses' }[F.days] || `${F.days} días`;
+  const pl = (F.min || F.max) ? `${F.min || 0}–${F.max || '∞'} jugadores` : 'todos los tamaños';
+  $('#fsum').textContent = `Filtros · ${per} · empates ${F.dec ? 'fuera del cálculo' : 'cuentan como no ganadas'} · ${pl}`;
+}
+
+// ---- Revisar mi lista (entrada propia): detecta el comandante y abre su análisis ----
+const cleanCard = n => String(n).replace(/\s*\*[A-Za-z]+\*\s*$/, '').replace(/\s+\([A-Za-z0-9]{2,6}\)\s*[\w★-]*\s*$/, '').split(' // ')[0].trim();
+function detectCommanders(text) {
+  const lines = text.split(/\r?\n/).map(l => l.trim());
+  const entry = l => { const m = l.match(/^(\d+)\s*x?\s+(.+)$/i); return cleanCard(m ? m[2] : l); };
+  // 1) sección de comandantes de la propia lista
+  const named = []; let inCmd = false;
+  for (const l of lines) {
+    const sec = l.match(/^~~\s*(.+?)\s*~~$/);
+    if (sec) { inCmd = /^commander/i.test(sec[1]); continue; }
+    if (/^commanders?:?$/i.test(l)) { inCmd = true; continue; }
+    if (!l) { if (named.length) inCmd = false; continue; }
+    if (inCmd) named.push(entry(l));
+  }
+  const all = new Set(lines.filter(Boolean).map(entry).map(x => x.toLowerCase()));
+  const byName = key => key.split(' / ').map(x => x.toLowerCase());
+  if (named.length) {
+    const want = [...named].sort().join(' / ').toLowerCase();
+    const hit = commanders.find(c => c.commander.toLowerCase() === want);
+    if (hit) return [hit.commander];
+  }
+  // 2) sin sección: comandantes conocidos cuyos nombres aparecen todos en la lista (primero los de pareja)
+  const cands = commanders.filter(c => byName(c.commander).every(n => all.has(n)));
+  const maxParts = Math.max(0, ...cands.map(c => byName(c.commander).length));
+  return cands.filter(c => byName(c.commander).length === maxParts).sort((a, b) => b.decks - a.decks).map(c => c.commander);
+}
+async function bindReviewList() {
+  await ensureCommanders();
+  const sel = $('#rl-cmd'), msg = $('#rl-msg');
+  sel.innerHTML = '<option value="">— detectarlo a partir de la lista —</option>' + commanders.map(c => `<option value="${esc(c.commander)}">${esc(cmdLabel(c.commander))} (${c.decks})</option>`).join('');
+  const saved = store.get('review'); if (saved) $('#rl-text').value = saved;
+  $('#rl-copy').onclick = () => copyText($('#rl-text').value, $('#rl-copy'));
+  $('#rl-go').onclick = () => {
+    const text = $('#rl-text').value;
+    if (!text.trim()) { msg.textContent = 'Pega primero tu lista.'; return; }
+    let key = sel.value;
+    if (!key) {
+      const found = detectCommanders(text);
+      if (found.length > 1) { msg.innerHTML = `Podría ser más de un comandante (${found.slice(0, 4).map(esc).join('; ')}): elige el tuyo en el desplegable.`; return; }
+      if (!found.length) { msg.textContent = 'No he podido detectar el comandante en tu lista (o tiene muy pocos mazos en estos datos): elígelo en el desplegable.'; return; }
+      key = found[0];
+    }
+    msg.textContent = '';
+    store.set('review', text); store.set('list:' + key, text);     // se recuerda; el análisis lo lee de ahí
+    view = { t: 'cmd', name: key, minWith: 5, tab: 'lista', autorun: true };
+    openCommander(key);
+  };
+}
+
 // Texto sobre cómo se cuentan los empates, según el modo elegido.
 const drawNote = () => F.dec
   ? `Solo se cuentan las partidas con ganador: las empatadas salen del cálculo (su frecuencia está en «Empates»). Así la referencia ronda el 25 %, lo esperable con 4 jugadores.`
   : `Los empates cuentan como partida no ganada, por eso la media del meta queda por debajo del 25 %.`;
 
+// ---- Torneos y listas top ----
+const dateEs = t => new Date(t * 1000).toLocaleDateString('es-ES');
+const rec = d => `${d.wins}-${d.draws}-${d.losses}`;
+// Porcentaje de victorias en ese torneo; sigue el ajuste de empates elegido (fuera del cálculo o como no ganados)
+const wrOf = d => { const g = F.dec ? d.wins + d.losses : d.wins + d.draws + d.losses; return g ? d.wins / g : null; };
+const recCell = d => { const w = wrOf(d); return `<td class="n" data-v="${w ?? -1}" title="Victorias-empates-derrotas${F.dec ? '; el porcentaje no cuenta los empates' : ''}">${rec(d)}${w == null ? '' : ` <span class="muted">· ${pct(w, 0)}</span>`}</td>`; };
+const posLabel = (rank, cut) => !rank ? '<span class="muted" title="Sin posición guardada (datos anteriores a este dato)">—</span>' : rank === 1 ? '<span class="tag">campeón</span>' : rank <= 4 ? `<b>${rank}.º</b>` : `${rank}.º`;
+const noRanksNote = '<div class="note">Todavía no hay posiciones guardadas para este periodo. Aparecerán cuando se renueve el seed (se descargan con cada torneo nuevo).</div>';
+const cmdLink = c => `<a href="#" class="cmdlink" data-cmd="${esc(c)}">${esc(cmdLabel(c))}</a>`;
+function bindCmdLinks(root) {
+  root.querySelectorAll('.cmdlink').forEach(a => { a.onclick = e => { e.preventDefault(); view.tab = undefined; openCommander(a.dataset.cmd); }; });
+}
+// Enlace a la lista original (Moxfield, Archidekt…): se muestra el nombre del sitio; solo http(s)
+const hostOf = u => { try { const x = new URL(u); return /^https?:$/.test(x.protocol) ? x.hostname.replace(/^www\./, '') : ''; } catch { return ''; } };
+const srcLink = u => { const h = hostOf(u); return h ? `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer" title="Abrir la lista original en ${esc(h)}">${esc(h.split('.')[0])} ↗</a>` : '<span class="muted" title="TopDeck no guarda el enlace de esta lista">—</span>'; };
+function deckRows(list, { withTournament = false, withCommander = true } = {}) {
+  return list.map(d => `<tr>
+    ${withTournament ? `<td class="muted">${dateEs(d.date)}</td><td>${esc(short(String(d.name || ''), 52))}</td><td class="n" title="Jugadores del torneo">${d.size}</td>` : ''}
+    <td class="n" data-v="${d.rank}">${posLabel(d.rank, d.cut)}</td><td>${esc(d.player || '—')}</td>${withCommander ? `<td>${cmdLink(d.commander)}</td>` : ''}
+    ${recCell(d)}<td>${srcLink(d.url)}</td><td>${d.rank ? `<button type="button" class="ghost" data-deck="${esc(d.tid)}" data-rank="${d.rank}">Ver lista</button>` : ''}</td></tr>`).join('');
+}
+function bindDeckButtons(root, target) {
+  root.querySelectorAll('[data-deck]').forEach(b => { b.onclick = () => showDeck(b.dataset.deck, Number(b.dataset.rank), target); });
+}
+// ---- Vista visual de una lista (tipo Moxfield) ----
+// TopDeck solo guarda el nombre de las cartas. El tipo, el coste y la imagen se piden a Scryfall desde el navegador
+// (una petición por cada 75 cartas, con caché en memoria). Si Scryfall no responde, la lista se muestra igual, sin agrupar.
+const scryCards = new Map();                       // nombre (y cara frontal) en minúsculas -> carta de Scryfall
+const frontOf = n => String(n).split(' // ')[0].toLowerCase();
+async function loadScryCards(names) {
+  const todo = [...new Set(names)].filter(n => !scryCards.has(n.toLowerCase()) && !scryCards.has(frontOf(n)));
+  for (let i = 0; i < todo.length; i += 75) {
+    const res = await fetch('https://api.scryfall.com/cards/collection', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ identifiers: todo.slice(i, i + 75).map(name => ({ name })) }),
+    });
+    if (!res.ok) throw new Error('Scryfall ' + res.status);
+    for (const c of (await res.json()).data || []) { scryCards.set(c.name.toLowerCase(), c); scryCards.set(frontOf(c.name), c); }
+  }
+}
+const scryOf = n => scryCards.get(n.toLowerCase()) || scryCards.get(frontOf(n));
+const scryImg = (c, size = 'small') => c && ((c.image_uris || (c.card_faces && c.card_faces[0] && c.card_faces[0].image_uris) || {})[size]);
+// Grupo de una carta según su tipo (como Moxfield: una criatura artefacto va con las criaturas)
+const TYPE_GROUPS = [['Criaturas', /Creature/], ['Planeswalkers', /Planeswalker/], ['Batallas', /Battle/], ['Instantáneos', /Instant/], ['Conjuros', /Sorcery/],
+  ['Artefactos', /Artifact/], ['Encantamientos', /Enchantment/], ['Tierras', /Land/]];
+function groupOf(name) {
+  const c = scryOf(name);
+  if (!c) return 'Otras';
+  const t = String(c.type_line || (c.card_faces && c.card_faces[0].type_line) || '');
+  const hit = TYPE_GROUPS.find(([, re]) => re.test(t.split(' // ')[0]));
+  return hit ? hit[0] : 'Otras';
+}
+const cmcOf = name => { const c = scryOf(name); return c ? Math.floor(c.cmc ?? (c.card_faces && c.card_faces[0].cmc) ?? 0) : null; };
+function deckVisual(d, host) {
+  const rare = new Set(d.unusual);
+  const withData = d.cards.some(c => scryOf(c.card));
+  const fig = (c, big) => {
+    const sc = scryOf(c.card), img = scryImg(sc, 'normal');
+    const flag = d.enough && rare.has(c.card) ? ' rara' : '';
+    return `<figure class="dcard${flag}${big ? ' cmdr' : ''}" data-card="${esc(c.card)}" title="${esc(c.card)}${d.enough ? ` · en el ${pct(c.share, 0)} de los mazos del comandante` : ''}">
+      ${img ? `<img src="${esc(img)}" alt="${esc(c.card)}" loading="lazy">` : `<div class="noimg">${esc(c.card)}</div>`}
+      ${c.copies > 1 ? `<span class="cp">×${c.copies}</span>` : ''}${flag ? '<span class="rr" title="Menos del 10 % de los mazos de este comandante la llevan">rara</span>' : ''}</figure>`;
+  };
+  const names = d.commander.split(' / ');
+  const cmdFigs = names.map(n => fig({ card: n, copies: 1, share: 1 }, true)).join('');
+  const groups = new Map();
+  for (const c of d.cards) { const g = withData ? groupOf(c.card) : 'Cartas'; (groups.get(g) || groups.set(g, []).get(g)).push(c); }
+  const order = [...TYPE_GROUPS.map(x => x[0]), 'Otras', 'Cartas'].filter(g => groups.has(g));
+  const sortC = (a, b) => (cmcOf(a.card) ?? 0) - (cmcOf(b.card) ?? 0) || a.card.localeCompare(b.card);
+  // Curva de maná (sin tierras): nº de cartas por coste, de 0 a 7 o más
+  let curve = '';
+  if (withData) {
+    const bins = Array(8).fill(0);
+    for (const c of d.cards) { if (groupOf(c.card) === 'Tierras') continue; const v = cmcOf(c.card); if (v != null) bins[Math.min(7, v)] += c.copies; }
+    const mx = Math.max(1, ...bins);
+    curve = `<div class="curve" aria-label="Curva de maná (sin tierras)">${bins.map((n, i) => `<div class="cb" title="${n} cartas de coste ${i === 7 ? '7 o más' : i}"><small>${n || ''}</small><i style="height:${Math.round(n / mx * 56)}px"></i><small class="d">${i === 7 ? '7+' : i}</small></div>`).join('')}</div>`;
+  }
+  host.innerHTML = `<div class="dgroup"><h3>Comandante${names.length > 1 ? 's' : ''}</h3><div class="dgrid">${cmdFigs}</div></div>` + curve +
+    order.map(g => `<div class="dgroup"><h3>${g} <span class="muted">(${groups.get(g).reduce((s, c) => s + c.copies, 0)})</span></h3><div class="dgrid">${[...groups.get(g)].sort(sortC).map(c => fig(c)).join('')}</div></div>`).join('') +
+    (withData ? '' : '<div class="note dk-offline">No se pudo consultar Scryfall para agrupar por tipo ni sacar las imágenes; se muestran los nombres. La vista «Tabla» tiene la lista completa.</div>');
+}
+async function showDeck(tid, rank, target) {
+  target.innerHTML = '<div class="panel muted">Cargando la lista…</div>';
+  target.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  let d;
+  try { d = await api(`/api/deck?tid=${encodeURIComponent(tid)}&rank=${rank}`); }
+  catch (e) { target.innerHTML = `<div class="panel muted">No se pudo cargar la lista: ${esc(e.message)}</div>`; return; }
+  const chips = list => list.map(x => cn(x.card || x)).join(', ');
+  target.innerHTML = `<div class="panel">
+    <h2>${esc(cmdLabel(d.commander))} <span class="muted" style="font-weight:400">· ${esc(d.player || 'jugador desconocido')}</span></h2>
+    <div class="muted">${esc(d.name)} · ${dateEs(d.date)} · ${d.size} jugadores · puesto ${d.rank}.º · récord ${rec(d)}${wrOf(d) == null ? '' : ` (${pct(wrOf(d), 0)} de victorias)`}</div>
+    <div class="tablepick" style="margin:10px 0">
+      <button class="primary" id="dk-copy" title="Copia la lista para importarla en Moxfield, Archidekt o Commander Spellbook">Copiar lista</button>
+      ${hostOf(d.url) ? `<a class="btn" href="${esc(d.url)}" target="_blank" rel="noopener noreferrer">Lista original (${esc(hostOf(d.url).split('.')[0])}) ↗</a>` : ''}
+      <button class="ghost" id="dk-cmd">Ver el comandante</button>
+    </div>
+    ${d.enough ? `
+      <h3>Qué tiene de distinta</h3>
+      <div>${d.unusual.length ? `<b>Cartas poco habituales</b> (menos del 10 % de los ${d.peers} mazos de este comandante): ${chips(d.unusual)}.` : 'No lleva ninguna carta poco habitual.'}</div>
+      <div style="margin-top:6px">${d.missing.length ? `<b>No lleva, y la mayoría sí</b> (más de la mitad de los mazos): ${chips(d.missing)}.` : 'Lleva todo lo que juega la mayoría.'}</div>` :
+      `<div class="muted">Hay pocos mazos de este comandante en el periodo (${d.peers}) para compararla con lo habitual.</div>`}
+    <div class="seg" id="dk-views" role="group" aria-label="Forma de ver la lista" style="margin-top:14px"><button type="button" data-v="img" aria-pressed="true">Imágenes</button><button type="button" data-v="tab" aria-pressed="false">Tabla</button></div>
+    <div id="dk-img" style="margin-top:10px"><span class="muted">Cargando imágenes…</span></div>
+    <table id="dk-tab" hidden style="margin-top:12px"><thead><tr><th>Carta</th><th class="n">Copias</th><th class="n">En mazos del comandante</th></tr></thead><tbody>
+      ${d.cards.map(c => `<tr><td>${cn(c.card)}</td><td class="n">${c.copies}</td><td><div class="share">${d.enough ? pct(c.share, 0) : '—'}<span style="width:${Math.round(c.share * 60)}px"></span></div></td></tr>`).join('')}
+    </tbody></table>
+    <div class="note">${d.total} cartas contando el comandante. «En mazos del comandante» es el porcentaje de los mazos de ese comandante en el periodo y filtros elegidos que llevan la carta.</div>
+  </div>`;
+  const cp = target.querySelector('#dk-copy');
+  cp.onclick = () => copyText(d.text, cp);
+  target.querySelector('#dk-cmd').onclick = () => { view.tab = undefined; openCommander(d.commander); };
+  const imgHost = target.querySelector('#dk-img'), tab = target.querySelector('#dk-tab');
+  target.querySelectorAll('#dk-views button').forEach(b => { b.onclick = () => {
+    target.querySelectorAll('#dk-views button').forEach(x => { x.setAttribute('aria-pressed', x === b); x.classList.toggle('on', x === b); });
+    imgHost.hidden = b.dataset.v !== 'img'; tab.hidden = b.dataset.v !== 'tab';
+  }; });
+  target.querySelector('#dk-views [data-v=img]').classList.add('on');
+  try { await loadScryCards([...d.cards.map(c => c.card), ...d.commander.split(' / ')]); } catch { /* sin Scryfall: se enseña sin agrupar */ }
+  deckVisual(d, imgHost);
+}
+// Un torneo: por defecto el top cut; se puede ver a todos, ordenar por resultados y filtrar por comandante o jugador.
+function showTournament(t, det, dk) {
+  det.innerHTML = `<div class="panel"><h2>${esc(t.name)}</h2><div class="muted">${dateEs(t.date)} · ${t.size} jugadores${t.elo ? ` · Elo medio ${t.elo}` : ''} · pasaron al top cut ${t.cut}</div>
+    <div class="tablepick" style="margin-top:10px">
+      <label>Ver <select id="tt-scope"><option value="cut">Top cut (${t.decks.filter(d => d.inCut).length})</option><option value="all">Todos los jugadores con lista (${t.decks.length})</option></select></label>
+      <label>Orden <select id="tt-sort"><option value="rank">Puesto final</option><option value="wr">Mejor porcentaje de victorias</option><option value="wins">Más victorias</option></select></label>
+      <label>Buscar <input type="search" id="tt-q" placeholder="comandante o jugador" autocomplete="off"></label>
+    </div>
+    <div id="tt-out" style="margin-top:10px"></div>
+    <div class="note">El récord incluye las rondas de top cut. El puesto final es el orden que da TopDeck; un récord mejor en las rondas suizas no siempre implica mejor puesto, porque el top cut decide los primeros puestos. «Enlace» abre la lista original cuando TopDeck la guardó con su dirección (a veces falta).</div></div>`;
+  const draw = () => {
+    const needle = det.querySelector('#tt-q').value.toLowerCase().trim(), scope = det.querySelector('#tt-scope').value, sort = det.querySelector('#tt-sort').value;
+    let list = t.decks.filter(d => (scope === 'all' || d.inCut) && (!needle || d.commander.toLowerCase().includes(needle) || String(d.player || '').toLowerCase().includes(needle)));
+    const by = { rank: (a, b) => a.rank - b.rank, wr: (a, b) => (wrOf(b) ?? -1) - (wrOf(a) ?? -1) || b.wins - a.wins || a.rank - b.rank, wins: (a, b) => b.wins - a.wins || a.rank - b.rank };
+    list = [...list].sort(by[sort]);
+    det.querySelector('#tt-out').innerHTML = list.length ? `<table><thead><tr><th class="n">Puesto</th><th>Jugador</th><th>Comandante</th><th class="n" title="Victorias-empates-derrotas en ese torneo (incluye el top cut) y porcentaje de victorias">Récord</th><th>Enlace</th><th></th></tr></thead><tbody>${deckRows(list)}</tbody></table>`
+      : '<span class="muted">Ningún jugador coincide con la búsqueda.</span>';
+    bindDeckButtons(det, dk); bindCmdLinks(det);
+  };
+  det.querySelector('#tt-scope').onchange = det.querySelector('#tt-sort').onchange = draw;
+  det.querySelector('#tt-q').oninput = draw;
+  draw(); det.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+async function bindTournaments() {
+  const q = $('#tr-q'), out = $('#tr-out'), det = $('#tr-det'), dk = $('#tr-deck');
+  let timer, seq = 0;
+  const load = async () => {
+    const my = ++seq;
+    let r;
+    try { r = await api('/api/tournaments?limit=40&q=' + encodeURIComponent(q.value.trim())); } catch (e) { out.innerHTML = `<span class="muted">No se pudo cargar: ${esc(e.message)}</span>`; return; }
+    if (my !== seq) return;
+    if (!r.ranked) { out.innerHTML = noRanksNote; return; }
+    if (!r.tournaments.length) { out.innerHTML = '<span class="muted">Ningún torneo coincide con la búsqueda.</span>'; return; }
+    out.innerHTML = `<table><thead><tr><th>Fecha</th><th>Torneo</th><th class="n">Jugadores</th><th>Podio</th><th></th></tr></thead><tbody>${r.tournaments.map(t => `<tr>
+      <td class="muted" data-v="${t.date}">${dateEs(t.date)}</td><td>${esc(short(String(t.name || ''), 52))}${t.elo ? ` <span class="muted" title="Elo medio de los jugadores">· Elo ${t.elo}</span>` : ''}</td><td class="n">${t.size}</td>
+      <td>${t.top.map(d => `<span class="muted">${d.rank}.º</span> ${esc(cmdLabel(d.commander))}`).join(' · ')}</td>
+      <td><button type="button" class="ghost" data-tid="${esc(t.tid)}">Ver top ${t.cut}</button></td></tr>`).join('')}</tbody></table>
+      <div class="note">${r.total > r.tournaments.length ? `Se muestran ${r.tournaments.length} de ${r.total} torneos; afina la búsqueda para ver otros. ` : ''}«Podio» son los cuatro primeros puestos.</div>`;
+    out.querySelectorAll('[data-tid]').forEach(b => { b.onclick = async () => {
+      det.innerHTML = '<div class="panel muted">Cargando…</div>'; dk.innerHTML = '';
+      try { showTournament(await api('/api/tournament?tid=' + encodeURIComponent(b.dataset.tid)), det, dk); }
+      catch (e) { det.innerHTML = `<div class="panel muted">${esc(e.message)}</div>`; }
+    }; });
+  };
+  q.oninput = () => { clearTimeout(timer); timer = setTimeout(load, 250); };
+  load();
+}
+async function bindTopDecks() {
+  const f = { cmd: $('#td-cmd'), card: $('#td-card'), pl: $('#td-pl'), scope: $('#td-scope') }, out = $('#td-out'), dk = $('#td-deck'), box = $('#td-sug');
+  await ensureCommanders();
+  $('#td-cmds').innerHTML = commanders.map(c => `<option value="${esc(c.commander)}">`).join('');
+  let seq = 0;
+  const go = async () => {
+    const my = ++seq;
+    out.innerHTML = '<span class="muted">Buscando…</span>'; dk.innerHTML = '';
+    const qs = new URLSearchParams({ scope: f.scope.value, limit: 60 });
+    if (f.cmd.value.trim()) qs.set('commander', f.cmd.value.trim());
+    if (f.card.value.trim()) qs.set('card', f.card.value.trim());
+    if (f.pl.value.trim()) qs.set('player', f.pl.value.trim());
+    let r;
+    try { r = await api('/api/decks?' + qs); } catch (e) { out.innerHTML = `<span class="muted">No se pudo buscar: ${esc(e.message)}</span>`; return; }
+    if (my !== seq) return;
+    if (!r.total) { out.innerHTML = '<span class="muted">Ninguna lista coincide. Si buscas una carta, escribe su nombre completo (elige una sugerencia); si faltan posiciones, aparecerán al renovar el seed.</span>'; return; }
+    out.innerHTML = `<table><thead><tr><th>Fecha</th><th>Torneo</th><th class="n">Jugadores</th><th class="n">Puesto</th><th>Jugador</th><th>Comandante</th><th class="n" title="Victorias-empates-derrotas en ese torneo (incluye el top cut) y porcentaje de victorias">Récord</th><th>Enlace</th><th></th></tr></thead><tbody>${deckRows(r.decks, { withTournament: true })}</tbody></table>
+      <div class="note">${r.total > r.decks.length ? `${r.total} listas; se muestran las ${r.decks.length} más recientes.` : `${r.total} ${r.total === 1 ? 'lista' : 'listas'}.`}</div>`;
+    bindDeckButtons(out, dk); bindCmdLinks(out);
+  };
+  $('#td-go').onclick = go;
+  [f.cmd, f.card, f.pl].forEach(i => { i.onkeydown = e => { if (e.key === 'Enter') { box.innerHTML = ''; go(); } }; });
+  f.scope.onchange = go; f.cmd.onchange = go;
+  let timer;
+  f.card.oninput = () => {
+    clearTimeout(timer);
+    const v = f.card.value.trim();
+    if (v.length < 2) { box.innerHTML = ''; return; }
+    timer = setTimeout(async () => {
+      try {
+        const r = await api('/api/cards?q=' + encodeURIComponent(v));
+        box.innerHTML = r.map(x => `<button type="button" class="sug" data-n="${esc(x.card)}" data-card="${esc(x.card)}"><span class="nm">${esc(x.card)}</span><span class="ct">${x.decks.toLocaleString('es-ES')} mazos</span></button>`).join('');
+        box.querySelectorAll('button').forEach(b => { b.onclick = () => { f.card.value = b.dataset.n; box.innerHTML = ''; go(); }; });
+      } catch { box.innerHTML = ''; }
+    }, 150);
+  };
+  go();
+}
+async function loadCommanderTournaments(name) {
+  const q = $('#ct-q'), scope = $('#ct-scope'), sort = $('#ct-sort'), out = $('#ct-out'), more = $('#ct-more'), dk = $('#ct-deck'), sum = $('#ct-sum');
+  const PAGE = 30;
+  let shown = 0, seq = 0, timer;
+  const load = async append => {
+    const my = ++seq;
+    if (!append) { shown = 0; out.innerHTML = '<span class="muted">Cargando…</span>'; }
+    const qs = new URLSearchParams({ name, q: q.value.trim(), scope: scope.value, sort: sort.value, limit: PAGE, offset: shown });
+    let r;
+    try { r = await api('/api/commander-decks?' + qs); } catch (e) { out.innerHTML = `<span class="muted">No se pudo cargar: ${esc(e.message)}</span>`; return; }
+    if (my !== seq) return;
+    const s = r.summary;
+    sum.innerHTML = `<b>${s.decks}</b> ${s.decks === 1 ? 'mazo' : 'mazos'} en <b>${s.tournaments}</b> ${s.tournaments === 1 ? 'torneo' : 'torneos'}` + (s.ranked ? ` · ${s.cut} pasaron al top cut · ${s.top4} en el top 4 · ${s.wins} ${s.wins === 1 ? 'campeonato' : 'campeonatos'}` : ' · aún sin posiciones guardadas (aparecen al renovar el seed)');
+    if (!r.total) { out.innerHTML = '<span class="muted">Ningún mazo coincide con la búsqueda y los filtros.</span>'; more.hidden = true; return; }
+    const rows = deckRows(r.decks, { withTournament: true, withCommander: false });
+    if (append) out.querySelector('tbody').insertAdjacentHTML('beforeend', rows);
+    else out.innerHTML = `<table><thead><tr><th>Fecha</th><th>Torneo</th><th class="n">Jugadores</th><th class="n">Puesto</th><th>Jugador</th><th class="n" title="Victorias-empates-derrotas en ese torneo (incluye el top cut) y porcentaje de victorias">Récord</th><th>Enlace</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+    shown += r.decks.length;
+    bindDeckButtons(out, dk); bindCmdLinks(out);
+    more.hidden = shown >= r.total;
+    more.textContent = `Mostrar más (${r.total - shown} restantes)`;
+  };
+  more.onclick = () => load(true);
+  q.oninput = () => { clearTimeout(timer); timer = setTimeout(() => load(false), 250); };
+  scope.onchange = sort.onchange = () => load(false);
+  load(false);
+}
+const torneosHtml = () => `<div class="panel">
+    <h2>Torneos y su podio</h2>
+    <div class="muted" style="margin-bottom:8px">Los torneos cEDH del periodo elegido, del más reciente al más antiguo. Busca por nombre del torneo, jugador o comandante y abre su top cut para ver cada lista.</div>
+    <label class="sr" for="tr-q">Buscar torneos</label>
+    <input type="search" id="tr-q" placeholder="Nombre del torneo, jugador o comandante…" autocomplete="off">
+    <div id="tr-out" style="margin-top:10px" class="muted">Cargando…</div>
+  </div><div id="tr-det"></div><div id="tr-deck"></div>`;
+const topDecksHtml = () => `<div class="panel">
+    <h2>Buscar listas que hicieron top</h2>
+    <div class="muted" style="margin-bottom:8px">Encuentra listas que ganaron, entraron en el top 4 o pasaron al top cut. Filtra por comandante, por una carta que lleven o por jugador.</div>
+    <div class="tablepick">
+      <label>Comandante <input type="text" id="td-cmd" list="td-cmds" placeholder="cualquiera" autocomplete="off"></label><datalist id="td-cmds"></datalist>
+      <label>Lleva la carta <input type="search" id="td-card" placeholder="Rhystic Study…" autocomplete="off"></label>
+      <label>Jugador <input type="search" id="td-pl" placeholder="cualquiera" autocomplete="off"></label>
+      <label>Resultado <select id="td-scope"><option value="cut">Pasó al top cut</option><option value="top4">Top 4</option><option value="win">Campeón</option></select></label>
+      <button class="primary" id="td-go">Buscar</button>
+    </div>
+    <div id="td-sug" class="sugs" role="listbox" aria-label="Sugerencias de cartas"></div>
+    <div id="td-out" style="margin-top:10px"></div>
+  </div><div id="td-deck"></div>`;
+const loadTorneos = () => subTabs($('#tor-host'), [
+  { id: 'torneos', label: 'Torneos', html: torneosHtml(), load: bindTournaments },
+  { id: 'listas', label: 'Buscar listas top', html: topDecksHtml(), load: bindTopDecks },
+]);
+
 function renderList() {
-  view = { t: 'list', tab: view.tab, card: view.card }; writeHash();
+  view = { t: 'list', tab: view.tab, sub: view.sub, card: view.card }; writeHash();
   const active = pickTab('list');
   $('#app').innerHTML = tabsHtml('list', active) +
-    tabPanel('comandantes', active, `
+    tabPanel('mazos', active, `
+    <div class="quick">
+      <button type="button" data-go="mesa"><b>Preparar una mesa</b><span>Tu comandante contra los rivales que esperas</span></button>
+      <button type="button" data-go="lista"><b>Revisar mi lista</b><span>Qué te falta o te sobra frente a listas como la tuya</span></button>
+      <button type="button" data-go="meta"><b>Ver el meta</b><span>Qué se juega ahora y qué sube o baja</span></button>
+    </div>
     <div class="panel">
-      <label class="sr" for="q">Buscar comandante</label>
-      <input type="search" id="q" placeholder="Buscar comandante…" autofocus>
+      <label class="sr" for="q">Filtrar la lista de comandantes</label>
+      <input type="search" id="q" placeholder="Filtrar la lista de comandantes…">
+      <label class="muted" style="display:inline-flex;gap:6px;align-items:center;margin-top:8px"><input type="checkbox" id="showall"> Incluir los de menos de ${MIN_TABLE} mazos (<span id="nfew"></span>): su winrate es poco fiable</label>
       <table style="margin-top:12px"><thead><tr>
         <th>Comandante</th><th class="n">Mazos</th><th class="n">Presencia en el meta</th><th>Winrate (la línea marca la media: ${pct(F.meta)})</th><th class="n">vs media</th><th class="n" title="Partidas empatadas sobre el total">Empates</th>
       </tr></thead><tbody id="rows"></tbody></table>
       <div class="note">La referencia es la <b>media del meta</b> en el periodo elegido (${pct(F.meta)}). ${drawNote()} Verde o rojo solo si el intervalo de confianza al 95 % queda entero por encima o por debajo de la media; en <b>gris</b> no se distingue de ella (suele ser falta de partidas). Se cuentan las partidas suizas y las eliminatorias.</div>
     </div>`) +
-    tabPanel('meta', active, `<div id="meta" class="panel muted">Calculando…</div>`) +
-    tabPanel('novedades', active, `<div id="nov" class="panel muted">Calculando…</div>`) +
+    tabPanel('meta', active, `<div id="meta-host"></div>`) +
+    tabPanel('torneos', active, `<div id="tor-host"></div>`) +
     tabPanel('mesa', active, `
     <div class="panel">
       <h2>Preparar una mesa</h2>
@@ -716,6 +1107,20 @@ function renderList() {
       <div class="tablepick" id="tb-pick"><span class="muted">Cargando comandantes…</span></div>
     </div>
     <div id="tb-out"></div>`) +
+    tabPanel('lista', active, `
+    <div class="panel">
+      <h2>Revisar mi lista</h2>
+      <div class="muted" style="margin-bottom:10px">Pega tu lista (formato Moxfield o Archidekt: «1 Sol Ring»). Detecto el comandante si tu lista lo indica; si no, elígelo. Te diré qué te falta o te sobra frente a las listas más parecidas a la tuya.</div>
+      <label class="sr" for="rl-text">Tu lista de cartas</label>
+      <textarea class="list" id="rl-text" placeholder="~~Commanders~~&#10;1 Kinnan, Bonder Prodigy&#10;&#10;~~Mainboard~~&#10;1 Sol Ring&#10;1 Rhystic Study&#10;…"></textarea>
+      <div class="tablepick" style="margin-top:10px">
+        <label>Comandante <select id="rl-cmd"><option value="">— detectarlo a partir de la lista —</option></select></label>
+        <button class="primary" id="rl-go">Revisar mi lista</button>
+        <button class="ghost" id="rl-copy" title="Copia la lista para pegarla en Commander Spellbook">Copiar mi lista</button>
+      </div>
+      <div id="rl-msg" class="muted" style="margin-top:8px"></div>
+      <div class="muted" style="margin-top:6px;font-size:13px">¿Combos de tu lista? Pégala en <a href="https://commanderspellbook.com/find-my-combos/" target="_blank" rel="noopener">Commander Spellbook</a>.</div>
+    </div>`) +
     tabPanel('cartas', active, `
     <div class="panel">
       <h2>Buscar una carta</h2>
@@ -725,21 +1130,12 @@ function renderList() {
       <div id="cs-sug" class="sugs" role="listbox" aria-label="Sugerencias de cartas"></div>
     </div>
     <div id="cs-out"></div>`) +
-    tabPanel('matriz', active, `
-    <div class="panel">
-      <h2>Matriz de matchups (12 comandantes más jugados)</h2>
-      <div id="matrix" class="muted">Calculando…</div>
-      <div class="note">Cada celda es el winrate del comandante de la fila en mesas donde está el de la columna. Verde = por encima de su media, rojo = por debajo (color completo a ±8 puntos). «—»: menos de 30 mesas. ${F.dec ? 'Solo cuentan las mesas con ganador y con todos los comandantes conocidos.' : 'Los empates cuentan como mesa no ganada.'}</div>
-    </div>`) +
-    tabPanel('fiabilidad', active, `
-    <div class="panel">
-      <h2>¿Cuánto se puede fiar de las cartas recomendadas?</h2>
-      <div id="validation" class="muted">Calculando…</div>
-    </div>`);
+    tabPanel('mas', active, `<div id="mas-host"></div>`);
   const maxShare = Math.max(0.001, ...commanders.map(c => c.metaShare));
   const draw = () => {
-    const q = $('#q').value.toLowerCase();
-    $('#rows').innerHTML = commanders.filter(c => c.commander.toLowerCase().includes(q)).map(c => `
+    const q = $('#q').value.toLowerCase(), all = $('#showall').checked;
+    // Con texto en el filtro se buscan todos; sin él, la tabla enseña solo los de muestra razonable (salvo que se pida lo contrario)
+    $('#rows').innerHTML = commanders.filter(c => c.commander.toLowerCase().includes(q) && (all || q || c.decks >= MIN_TABLE)).map(c => `
       <tr class="click" data-c="${esc(c.commander)}" tabindex="0" role="link" aria-label="Abrir ${esc(c.commander)}">
         <td>${cn(c.commander)}</td><td class="n">${c.decks}</td>
         <td><div class="share">${pct(c.metaShare)}<span style="width:${Math.min(100, c.metaShare / maxShare * 60)}px"></span></div></td>
@@ -749,11 +1145,30 @@ function renderList() {
       </tr>`).join('');
     sortTable($('#rows').closest('table'));
   };
+  $('#nfew').textContent = commanders.filter(c => c.decks < MIN_TABLE).length;
+  $('#showall').onchange = draw;
   $('#q').oninput = draw; draw();
   const open = e => { const tr = e.target.closest('tr'); if (tr) { view.tab = undefined; openCommander(tr.dataset.c); } };
   $('#rows').onclick = open;
   $('#rows').onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(e); } };
-  bindTabs('list', { meta: loadMeta, novedades: loadNovelties, mesa: bindTableTool, cartas: bindCardSearch, matriz: loadMatrix, fiabilidad: loadValidation });
+  document.querySelectorAll('[data-go]').forEach(b => { b.onclick = () => goTab(b.dataset.go); });
+  const matrixHtml = `<div class="panel">
+      <h2>Matriz de matchups (12 comandantes más jugados)</h2>
+      <div id="matrix" class="muted">Calculando…</div>
+      <div class="note">Cada celda es el winrate del comandante de la fila en mesas donde está el de la columna. Verde = por encima de su media, rojo = por debajo (color completo a ±8 puntos). «—»: menos de 30 mesas. ${F.dec ? 'Solo cuentan las mesas con ganador y con todos los comandantes conocidos.' : 'Los empates cuentan como mesa no ganada.'}</div>
+    </div>`;
+  bindTabs('list', {
+    meta: () => subTabs($('#meta-host'), [
+      { id: 'panorama', label: 'Panorama', html: '<div id="meta" class="panel muted">Calculando…</div>', load: loadMeta },
+      { id: 'novedades', label: 'Novedades de cartas', html: '<div id="nov" class="panel muted">Calculando…</div>', load: loadNovelties },
+    ]),
+    torneos: loadTorneos, mesa: bindTableTool, lista: bindReviewList, cartas: bindCardSearch,
+    mas: () => subTabs($('#mas-host'), [
+      { id: 'guia', label: 'Cómo leer esto', html: guideHtml() },
+      { id: 'matriz', label: 'Matriz de matchups', html: matrixHtml, load: loadMatrix },
+      { id: 'fiabilidad', label: 'Fiabilidad del método', html: '<div class="panel"><h2>¿Cuánto se puede fiar de las cartas recomendadas?</h2><div id="validation" class="muted">Calculando…</div></div>', load: loadValidation },
+    ]),
+  });
 }
 
 async function openCommander(name, minWith = 5) {
@@ -777,7 +1192,7 @@ async function openCommander(name, minWith = 5) {
 
   const active = pickTab('cmd');
   $('#app').innerHTML = `
-    <button class="back" id="back">← Todos los comandantes</button>
+    <button class="back" id="back">← Mazos</button>
     <div class="head">
       <h2 style="font-size:20px">${cn(r.commander)}</h2>
       <div class="ctl" style="margin:0">
@@ -812,43 +1227,29 @@ async function openCommander(name, minWith = 5) {
     </div>
     ${tabsHtml('cmd', active)}
     ${tabPanel('cartas', active, `
-      <div class="ctl">
-        <label>Mínimo de mazos con la carta (y sin ella):
-          <select id="min">${[3, 5, 10, 20].map(n => `<option ${n === minWith ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
-      </div>
-      <div class="cols wide">
-        <div class="panel"><h2>Cartas asociadas a más winrate</h2><table>${head}<tbody>${liftRows(r.best) || '<tr><td class="muted">Sin datos suficientes</td></tr>'}</tbody></table></div>
-        <div class="panel"><h2>Cartas asociadas a menos winrate</h2><table>${head}<tbody>${liftRows(r.worst) || '<tr><td class="muted">Sin datos suficientes</td></tr>'}</tbody></table></div>
-      </div>
-      <div class="panel">
-        <h2>Mapa de cartas: popularidad frente a rendimiento</h2>
-        ${scatter(r.popular)}
-        <div class="note">Cada punto es una carta; pasa el ratón para ver el detalle. Los puntos tenues son los de menos fiabilidad. Tamaño = nº de mazos que la juegan.</div>
-      </div>
       <div class="panel">
         <h2>Cartas más jugadas con este comandante</h2>
         <label class="sr" for="cq">Filtrar carta</label>
         <input type="search" id="cq" placeholder="Filtrar carta…">
         <table style="margin-top:12px"><thead><tr><th>Carta</th><th class="n">Inclusión</th><th class="n">Winrate con ella</th><th class="n">Diferencia</th></tr></thead><tbody id="crows"></tbody></table>
       </div>
-      <div class="panel note" style="margin:0">
-        <b>Cómo leerlo.</b> «Dif. bruta» compara el winrate de los mazos que juegan la carta con los que no, para este comandante.
-        <b>Ajustada</b> es esa diferencia «encogida» hacia 0 cuanto menos mazos hay: una carta en 6 mazos con +30 pts no gana a otra en 200 mazos con +5 pts (las tablas se ordenan por ella).
-        <b>Fiabilidad</b> corrige por comparar cientos de cartas a la vez: «alta» = es poco probable que sea casualidad. Es <b>correlación, no causalidad</b>: una carta puede aparecer más en los mazos de jugadores mejores, o en mazos con otro plan de juego.
-        Las cartas que casi todos juegan (<span class="tag">core</span>) no se pueden comparar por falta de mazos sin ellas.
-      </div>`)}
-    ${tabPanel('matchups', active, `
-      <div class="panel">
-        <h2>Rendimiento contra el meta</h2>
-        <div id="mu" class="muted">Calculando…</div>
-      </div>
-      <div id="cv"></div>`)}
-    ${tabPanel('evolucion', active, `
-      <div class="panel">
-        <h2>Evolución en el tiempo</h2>
-        <div id="trend" class="muted">Calculando…</div>
-      </div>`)}
-    ${tabPanel('variantes', active, `
+      <details class="panel assoc">
+        <summary><b>Cartas asociadas a más y a menos winrate</b> <span class="muted">· orientativo: correlación, no causalidad</span></summary>
+        <div class="ctl" style="margin-top:10px">
+          <label>Mínimo de mazos con la carta (y sin ella):
+            <select id="min">${[3, 5, 10, 20].map(n => `<option ${n === minWith ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+        </div>
+        <div class="cols wide">
+          <div><h2>Más winrate</h2><table>${head}<tbody>${liftRows(r.best) || '<tr><td class="muted">Sin datos suficientes</td></tr>'}</tbody></table></div>
+          <div><h2>Menos winrate</h2><table>${head}<tbody>${liftRows(r.worst) || '<tr><td class="muted">Sin datos suficientes</td></tr>'}</tbody></table></div>
+        </div>
+        <div class="note">
+          <b>Cómo leerlo.</b> «Dif. bruta» compara el winrate de los mazos que juegan la carta con los que no, para este comandante.
+          <b>Ajustada</b> es esa diferencia «encogida» hacia 0 cuanto menos mazos hay (las tablas se ordenan por ella). <b>Fiabilidad</b> corrige por comparar cientos de cartas a la vez.
+          Es <b>correlación, no causalidad</b>: una carta puede aparecer más en los mazos de jugadores mejores o en mazos con otro plan de juego, y con cambios reales de lista de los mismos jugadores no se confirmó que añadirla mejore el resultado.
+        </div>
+      </details>`)}
+    ${tabPanel('juega', active, `
       <div class="panel">
         <div class="row"><h2>Variantes de este comandante</h2>
           <label class="muted">Grupos: <select id="vk" style="width:auto">${[2, 3, 4, 5].map(n => `<option ${n === 3 ? 'selected' : ''}>${n}</option>`).join('')}</select></label></div>
@@ -867,6 +1268,29 @@ async function openCommander(name, minWith = 5) {
         <h2>Combos y amenazas</h2>
         <div id="cb" class="muted">Consultando Commander Spellbook (la primera vez puede tardar unos segundos)…</div>
       </div>`)}
+    ${tabPanel('resultados', active, `
+      <div class="panel">
+        <h2>Rendimiento contra el meta</h2>
+        <div id="mu" class="muted">Calculando…</div>
+      </div>
+      <div id="cv"></div>
+      <div class="panel">
+        <h2>Evolución en el tiempo</h2>
+        <div id="trend" class="muted">Calculando…</div>
+      </div>`)}
+    ${tabPanel('torneos', active, `
+      <div class="panel">
+        <h2>Torneos con este comandante</h2>
+        <div id="ct-sum" class="muted" style="margin-bottom:8px">Cargando…</div>
+        <div class="tablepick">
+          <label>Buscar <input type="search" id="ct-q" placeholder="torneo o jugador" autocomplete="off"></label>
+          <label>Resultado <select id="ct-scope"><option value="all">Todos</option><option value="cut">Pasó al top cut</option><option value="top4">Top 4</option><option value="win">Campeón</option></select></label>
+          <label>Orden <select id="ct-sort"><option value="date">Más recientes</option><option value="rank">Mejor puesto</option><option value="record">Mejor récord</option></select></label>
+        </div>
+        <div id="ct-out" style="margin-top:10px"></div>
+        <div style="margin-top:8px"><button type="button" class="ghost" id="ct-more" hidden>Mostrar más</button></div>
+      </div>
+      <div id="ct-deck"></div>`)}
     ${tabPanel('lista', active, `
       <div class="panel">
         <h2>Mi lista</h2>
@@ -880,8 +1304,9 @@ async function openCommander(name, minWith = 5) {
         </div>
         <div id="ml-out"></div>
       </div>`)}`;
-  $('#back').onclick = () => { view.tab = undefined; renderList(); };
+  $('#back').onclick = () => { view = { t: 'list', tab: 'mazos' }; renderList(); };
   bindMyList(name);
+  if (view.autorun) { view.autorun = false; $('#ml-go').click(); }   // viene de «Revisar mi lista»: se analiza al llegar
   $('#share').onclick = () => copyText(location.href, $('#share'));
   ensureCommanders().then(() => {
     $('#cmp').insertAdjacentHTML('beforeend', commanders.filter(c => c.commander !== name).map(c => `<option>${esc(c.commander)}</option>`).join(''));
@@ -900,9 +1325,9 @@ async function openCommander(name, minWith = 5) {
   $('#cq').oninput = drawCards; drawCards();
   window.scrollTo(0, 0);
   bindTabs('cmd', {
-    matchups: () => loadMatchups(name),
-    evolucion: () => loadTrend(name),
-    variantes: () => { loadVariants(name, 3); loadPackages(name); },
+    resultados: () => { loadMatchups(name); loadTrend(name); },
+    torneos: () => loadCommanderTournaments(name),
+    juega: () => { loadVariants(name, 3); loadPackages(name); },
     combos: () => { loadThreatCards(name); loadCombos(name); },
   });
 }
@@ -1144,4 +1569,7 @@ async function loadMatrix() {
 
 readHash();
 bindFilters();
+bindGlobalSearch();
+$('#filtersd').open = window.innerWidth > 760;   // en el móvil empiezan plegados
+updateFilterSummary();
 boot().catch(e => { $('#status').textContent = 'Error: ' + e.message; });

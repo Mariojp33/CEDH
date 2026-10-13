@@ -8,29 +8,38 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>cEDH Stats por comandante V2.1</h1>
-  <div class="sub">Qué cartas acompañan a un mayor winrate, a partir de torneos reales de TopDeck.gg. Pulsa en la cabecera de una tabla para ordenarla. «pts» son puntos de winrate: un 28 % frente a una media del 25 % son +3 pts.</div>
+  <header class="top">
+    <h1>cEDH Stats por comandante V2.1</h1>
+    <div class="gsearch" role="search">
+      <label class="sr" for="gq">Buscar un comandante o una carta</label>
+      <input type="search" id="gq" placeholder="Buscar un comandante o una carta…" autocomplete="off" aria-controls="gs" aria-expanded="false">
+      <div id="gs" class="gsug" role="listbox" aria-label="Resultados de la búsqueda" hidden></div>
+    </div>
+  </header>
   <div class="status muted" id="status" role="status" aria-live="polite">Cargando…</div>
-  <div class="panel filters" id="filters" role="group" aria-label="Filtros de los datos">
-    <div class="fgroup">
-      <span class="flabel" id="l-period">Periodo</span>
-      <span class="seg" id="period" role="group" aria-labelledby="l-period"><button data-d="30">1 mes</button><button data-d="90">3 meses</button><button data-d="180">6 meses</button></span>
+  <details class="filtersd" id="filtersd">
+    <summary id="fsum">Filtros</summary>
+    <div class="panel filters" id="filters" role="group" aria-label="Filtros de los datos">
+      <div class="fgroup">
+        <span class="flabel" id="l-period">Periodo</span>
+        <span class="seg" id="period" role="group" aria-labelledby="l-period"><button data-d="30">1 mes</button><button data-d="90">3 meses</button><button data-d="180">6 meses</button></span>
+      </div>
+      <div class="fgroup">
+        <span class="flabel" id="l-draws">Empates</span>
+        <span class="seg" id="draws" role="group" aria-labelledby="l-draws">
+          <button data-dec="1" title="Las partidas empatadas no se cuentan: winrate = victorias ÷ (victorias + derrotas). La referencia es ≈25 %.">Fuera del cálculo</button><button data-dec="0" title="Un empate cuenta como partida no ganada: winrate = victorias ÷ todas las partidas.">Cuentan como no ganadas</button>
+        </span>
+      </div>
+      <div class="fgroup">
+        <span class="flabel">Jugadores por torneo</span>
+        <span class="frow">
+          <label>mín <input type="number" id="fmin" min="0" placeholder="—"></label>
+          <label>máx <input type="number" id="fmax" min="0" placeholder="—"></label>
+          <span><button data-p="0,0">Todos</button> <button data-p="30,0">30+</button> <button data-p="50,0">50+</button> <button data-p="100,0">100+</button></span>
+        </span>
+      </div>
     </div>
-    <div class="fgroup">
-      <span class="flabel" id="l-draws">Empates</span>
-      <span class="seg" id="draws" role="group" aria-labelledby="l-draws">
-        <button data-dec="1" title="Las partidas empatadas no se cuentan: winrate = victorias ÷ (victorias + derrotas). La referencia es ≈25 %.">Fuera del cálculo</button><button data-dec="0" title="Un empate cuenta como partida no ganada: winrate = victorias ÷ todas las partidas.">Cuentan como no ganadas</button>
-      </span>
-    </div>
-    <div class="fgroup">
-      <span class="flabel">Jugadores por torneo</span>
-      <span class="frow">
-        <label>mín <input type="number" id="fmin" min="0" placeholder="—"></label>
-        <label>máx <input type="number" id="fmax" min="0" placeholder="—"></label>
-        <span><button data-p="0,0">Todos</button> <button data-p="30,0">30+</button> <button data-p="50,0">50+</button> <button data-p="100,0">100+</button></span>
-      </span>
-    </div>
-  </div>
+  </details>
   <div id="banners" role="status"></div>
   <main id="app" aria-live="polite"></main>
   <footer>

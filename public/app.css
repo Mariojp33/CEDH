@@ -72,10 +72,6 @@
   .rel.hi { color: var(--good); } .rel.mid { color: var(--accent); } .rel.lo { color: var(--muted); }
   textarea.list { width: 100%; min-height: 120px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--ink); font: 13px/1.4 ui-monospace, monospace; resize: vertical; }
   button.primary { padding: 7px 16px; border: 0; border-radius: 99px; background: var(--accent); color: #fff; font: inherit; cursor: pointer; }
-  svg.scatter { width: 100%; height: auto; display: block; }
-  svg.scatter text { fill: var(--muted); font-size: 11px; }
-  svg.scatter text.q { font-size: 12px; font-weight: 600; opacity: .8; }
-  svg.scatter text.pl { fill: var(--ink); font-size: 10.5px; }
   .variants { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
   .variant { border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
   .variant h3 { margin: 0 0 6px; font-size: 14px; }
@@ -86,6 +82,8 @@
   svg.trend text { fill: var(--muted); font-size: 11px; }
   button.ghost { padding: 4px 10px; border: 1px solid var(--line); border-radius: 99px; background: var(--bg); color: var(--ink); font: inherit; font-size: 12px; cursor: pointer; }
   button.ghost:hover { border-color: var(--accent); }
+  a.btn { display: inline-block; padding: 7px 16px; border: 1px solid var(--line); border-radius: 99px; background: var(--bg); color: var(--ink); text-decoration: none; }
+  a.btn:hover { border-color: var(--accent); }
   .row { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
   .row h2 { margin: 0; }
   table:not(.mx) thead th:not(:empty) { cursor: pointer; user-select: none; white-space: nowrap; }
@@ -198,3 +196,52 @@ pre.steps { white-space: pre-wrap; font: 12.5px/1.45 ui-monospace, monospace; ba
 .threats { margin-top: 6px; border-top: 1px solid var(--line); }
 
 h3.sec { margin: 16px 0 4px; font-size: 14.5px; } h3.sec small { font-weight: 400; }
+
+/* Cabecera con buscador único y filtros plegables */
+header.top { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 4px; }
+header.top h1 { margin: 0; }
+.gsearch { position: relative; flex: 1 1 340px; max-width: 520px; }
+.gsearch input { width: 100%; }
+.gsug { position: absolute; z-index: 40; left: 0; right: 0; top: calc(100% + 4px); background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 28px rgba(0,0,0,.18); overflow: hidden; max-height: 70vh; overflow-y: auto; }
+.gsug[hidden] { display: none; }
+.gsug .gh { padding: 6px 12px 3px; font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.gsug button { display: flex; justify-content: space-between; gap: 12px; width: 100%; padding: 8px 12px; border: 0; border-top: 1px solid var(--line); background: none; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.gsug button:hover, .gsug button:focus-visible { background: var(--bg); }
+.gsug .ex { color: var(--muted); font-size: 12.5px; white-space: nowrap; }
+details.filtersd { margin: 0 0 14px; }
+details.filtersd > summary { cursor: pointer; padding: 8px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); font-size: 13px; color: var(--muted); list-style-position: inside; }
+details.filtersd[open] > summary { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+details.filtersd > .panel { margin: 0; border-top: 0; border-top-left-radius: 0; border-top-right-radius: 0; }
+/* Subpestañas (Meta, Más) y atajos */
+.subtabs { display: flex; gap: 6px; margin: 0 0 12px; flex-wrap: wrap; }
+.subtabs button { padding: 6px 14px; border: 1px solid var(--line); border-radius: 99px; background: var(--bg); color: var(--ink); font: inherit; cursor: pointer; }
+.subtabs button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.quick { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.quick button { flex: 1 1 200px; text-align: left; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--ink); font: inherit; cursor: pointer; }
+.quick button:hover { border-color: var(--accent); }
+.quick b { display: block; margin-bottom: 2px; } .quick span { color: var(--muted); font-size: 13px; }
+.guide h3 { margin: 18px 0 4px; font-size: 14.5px; } .guide p { margin: 0 0 6px; }
+
+/* Foto de la carta en «Buscar carta» */
+.cardfig { float: right; width: 210px; max-width: 45%; margin: 0 0 12px 18px; }
+.cardfig img { display: block; width: 100%; height: auto; aspect-ratio: 488 / 680; border-radius: 4.5% / 3.2%; box-shadow: 0 4px 14px rgba(0,0,0,.3); background: var(--bg); }
+.cardfig .miss { padding: 40px 10px; text-align: center; border: 1px dashed var(--line); border-radius: 10px; color: var(--muted); font-size: 13px; }
+@media (max-width: 560px) { .cardfig { float: none; display: block; max-width: 240px; width: 70%; margin: 0 auto 14px; } }
+
+/* Vista visual de una lista (tipo Moxfield) */
+.seg button.on { background: var(--accent); color: #fff; }
+.dgroup { margin-top: 16px; }
+.dgroup h3 { margin: 0 0 8px; font-size: 14px; }
+.dgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 8px; }
+.dcard { position: relative; margin: 0; aspect-ratio: 488 / 680; border-radius: 4.5% / 3.2%; background: var(--bg); box-shadow: 0 1px 4px rgba(0,0,0,.35); }
+.dcard img { display: block; width: 100%; height: 100%; border-radius: inherit; }
+.dcard .noimg { height: 100%; display: flex; align-items: center; justify-content: center; padding: 8px; text-align: center; font-size: 12px; border: 1px solid var(--line); border-radius: inherit; }
+.dcard .cp { position: absolute; left: 6px; bottom: 6px; padding: 1px 7px; border-radius: 99px; background: rgba(0,0,0,.78); color: #fff; font-size: 12px; font-weight: 700; }
+.dcard .rr { position: absolute; right: 6px; top: 6px; padding: 1px 7px; border-radius: 99px; background: #d98e04; color: #fff; font-size: 11px; font-weight: 700; }
+.dcard.rara { outline: 2px solid #d98e04; outline-offset: -1px; }
+.dgrid:has(.cmdr) { grid-template-columns: repeat(auto-fill, minmax(150px, 190px)); }
+.curve { display: flex; align-items: flex-end; gap: 6px; margin-top: 16px; max-width: 360px; }
+.curve .cb { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 2px; }
+.curve .cb i { display: block; width: 100%; background: var(--accent); opacity: .65; border-radius: 3px 3px 0 0; min-height: 2px; }
+.curve small { font-size: 11px; color: var(--muted); }
+@media (max-width: 560px) { .dgrid { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); } }

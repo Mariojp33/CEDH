@@ -1,2 +1,6 @@
 data/
 node_modules/
+
+# claves locales
+env.local
+.env.local

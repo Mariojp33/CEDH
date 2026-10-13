@@ -5,6 +5,7 @@ const zlib = require('node:zlib');
 const fs = require('node:fs');
 const path = require('node:path');
 const { fetchTournaments } = require('./lib/topdeck');
+const tournaments = require('./lib/tournaments');
 const { BASICS, buildRecords, filterRecords, commanderList, classifyTournaments, neighborsReport, commanderReport, metaWinRate, decisive, decisiveSeats, validationReport, myListReport, packagesReport, trendReport, variantsReport, matchups, matrix, cardsVsOpponent } = require('./lib/stats');
 const cache = require('./lib/cache');
 const { parseText } = require('./lib/parse');
@@ -194,7 +195,7 @@ function serveStatic(res, file) {
 const memo = new Map();
 let memoStamp = null;
 const seatCache = { stamp: null, map: new Map() };
-const MEMO_PATHS = new Set(['/api/threats', '/api/table', '/api/card', '/api/card-alternatives', '/api/novelties', '/api/meta', '/api/packages', '/api/variants', '/api/trend', '/api/matchups', '/api/matrix', '/api/cards-vs', '/api/validation']);
+const MEMO_PATHS = new Set(['/api/commander-decks', '/api/tournaments', '/api/tournament', '/api/decks', '/api/deck', '/api/threats', '/api/table', '/api/card', '/api/card-alternatives', '/api/novelties', '/api/meta', '/api/packages', '/api/variants', '/api/trend', '/api/matchups', '/api/matrix', '/api/cards-vs', '/api/validation']);
 
 // ---- Combos y amenazas (Commander Spellbook) ----
 // Se consulta a Spellbook solo cuando alguien abre los combos de un comandante; el resultado se guarda 24 h y las
@@ -270,6 +271,27 @@ const handle = (req, res) => {
       // torneos descartados por no parecer cEDH (se guardan solo para poder avisar de ello)
       excluded: { tournaments: excluded.size, decks: [...excluded.values()].reduce((x, y) => x + y, 0) },
     });
+  }
+  // ---- Torneos y listas que hicieron top (solo lee los mazos ya descargados) ----
+  if (url.pathname === '/api/tournaments') {
+    return send(200, tournaments.tournamentsReport(records, { q: url.searchParams.get('q') || '', limit: Math.min(100, parseInt(url.searchParams.get('limit'), 10) || 30) }));
+  }
+  if (url.pathname === '/api/commander-decks') {
+    const g = k => (url.searchParams.get(k) || '').slice(0, 120);
+    const rep = tournaments.commanderDecksReport(records, g('name'), { q: g('q'), scope: g('scope') || 'all', sort: g('sort') || 'date', limit: parseInt(url.searchParams.get('limit'), 10) || 30, offset: parseInt(url.searchParams.get('offset'), 10) || 0 });
+    return rep ? send(200, rep) : send(404, { error: 'Comandante no encontrado' });
+  }
+  if (url.pathname === '/api/tournament') {
+    const rep = tournaments.tournamentDetail(records, url.searchParams.get('tid') || '');
+    return rep ? send(200, rep) : send(404, { error: 'Torneo no encontrado (o sin posiciones guardadas todavía)' });
+  }
+  if (url.pathname === '/api/decks') {
+    const g = k => (url.searchParams.get(k) || '').slice(0, 120);
+    return send(200, tournaments.decksReport(records, { commander: g('commander'), card: g('card'), player: g('player'), scope: g('scope') || 'cut', limit: Math.min(200, parseInt(url.searchParams.get('limit'), 10) || 60) }));
+  }
+  if (url.pathname === '/api/deck') {
+    const rep = tournaments.deckDetail(records, url.searchParams.get('tid') || '', parseInt(url.searchParams.get('rank'), 10) || 0);
+    return rep ? send(200, rep) : send(404, { error: 'Lista no encontrada' });
   }
   if (url.pathname === '/api/commanders') {
     const min = Math.max(1, Number(url.searchParams.get('min')) || 5);
