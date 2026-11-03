@@ -252,7 +252,7 @@ test('interfaz: recorrido por secciones, buscador único, ficha y «Revisar mi l
   assert.deepStrictEqual(r.inicio, ['Mazos', 'Meta', 'Torneos y listas', 'Preparar mesa', 'Revisar mi lista', 'Buscar carta', 'Más']);
   assert.strictEqual(r.atajos, 3);
   assert.ok(r.pocosMazos.ocultos > 0 && r.pocosMazos.despues === r.pocosMazos.antes + r.pocosMazos.ocultos, 'la casilla añade a la tabla los comandantes con menos de 5 mazos');
-  assert.match(r.cabecera.resumen, /Filtros · 3 meses · empates fuera del cálculo/);
+  assert.match(r.cabecera.resumen, /Filtros · 3 meses · empates cuentan como no ganadas/);
   assert.deepStrictEqual(r.meta.apartados, ['Panorama', 'Novedades de cartas']);
   assert.ok(r.meta.niveles >= 3 && /t=meta&s=panorama/.test(r.meta.hash.replace(/&amp;/g, '&')));
   assert.ok(r.novedades.cargado && /s=novedades/.test(r.novedades.hash));

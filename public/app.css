@@ -268,3 +268,152 @@ a.plink:hover { color: var(--accent); text-decoration: underline; }
 .mini-t { font-weight: 600; margin-bottom: 4px; }
 svg.mini { width: 100%; height: auto; display: block; }
 svg.mini text { fill: var(--muted); font-size: 10.5px; }
+
+/* ==========================================================================
+   Pulido visual (UI/UX): capa final que refina lo anterior sin cambiar el marcado
+   ========================================================================== */
+:root {
+  --radius: 14px; --radius-sm: 10px;
+  --shadow-1: 0 1px 2px rgba(30,25,15,.05), 0 2px 8px rgba(30,25,15,.04);
+  --shadow-2: 0 6px 24px rgba(30,25,15,.12);
+  --hover: color-mix(in srgb, var(--ink) 5%, transparent);
+  --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
+  --ease: cubic-bezier(.2,.7,.2,1);
+}
+@media (prefers-color-scheme: dark) {
+  :root { --shadow-1: 0 1px 2px rgba(0,0,0,.3); --shadow-2: 0 8px 28px rgba(0,0,0,.5); }
+}
+html { scroll-behavior: smooth; scroll-padding-top: 84px; -webkit-text-size-adjust: 100%; }
+body { font-size: 15px; line-height: 1.55; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+::selection { background: var(--accent-soft); }
+.wrap { padding-top: 0; }
+
+/* Cabecera fija con el buscador siempre a mano */
+header.top {
+  position: sticky; top: 0; z-index: 30; margin: 0 -16px 12px; padding: 12px 16px;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  -webkit-backdrop-filter: saturate(1.4) blur(10px); backdrop-filter: saturate(1.4) blur(10px);
+  border-bottom: 1px solid var(--line);
+}
+header.top h1 { font-size: 20px; font-weight: 700; letter-spacing: -.02em; }
+.gsearch input {
+  padding: 10px 14px 10px 38px; border-radius: 99px; background-color: var(--panel); box-shadow: var(--shadow-1);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%239a958a' stroke-width='2.2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: 14px 50%;
+}
+.gsug { border-radius: var(--radius-sm); box-shadow: var(--shadow-2); }
+.status { margin-bottom: 12px; }
+
+/* Controles: transiciones y estados coherentes */
+input[type=search], input[type=number], select, textarea.list {
+  transition: border-color .15s var(--ease), box-shadow .15s var(--ease), background-color .15s var(--ease);
+}
+input:hover, select:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+input:focus, select:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); outline: none; }
+button, .seg button, .tabs button, .subtabs button, .quick button, .sug, .gsug button { transition: background-color .15s var(--ease), border-color .15s var(--ease), color .15s var(--ease), box-shadow .15s var(--ease), transform .1s var(--ease); }
+button:active:not(:disabled) { transform: translateY(1px); }
+button.primary { font-weight: 600; box-shadow: var(--shadow-1); }
+button.primary:hover { filter: brightness(1.08); }
+.seg { background: var(--panel); box-shadow: var(--shadow-1); }
+.seg button:hover:not(.on) { background: var(--hover); }
+.subtabs button:hover:not(.on), .filters button:hover, button.ghost:hover { background: var(--accent-soft); }
+
+/* Filtros plegables */
+details.filtersd > summary { border-radius: 99px; padding: 7px 16px; width: max-content; background: var(--panel); box-shadow: var(--shadow-1); }
+details.filtersd[open] > summary { border-radius: var(--radius-sm) var(--radius-sm) 0 0; width: 100%; }
+details.filtersd > summary:hover { color: var(--ink); border-color: var(--accent); }
+
+/* Paneles y tarjetas */
+.panel, .tile { border-radius: var(--radius); box-shadow: var(--shadow-1); }
+.panel { padding: 20px; margin-bottom: 18px; }
+.panel > h2:first-child, .panel > .row:first-child h2 { font-size: 17px; font-weight: 650; letter-spacing: -.01em; }
+h2 { margin-bottom: 14px; }
+.tile { padding: 14px 16px; border-top: 3px solid var(--accent-soft); }
+.tile .v { font-size: 28px; font-weight: 700; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.tile .l { margin-top: 2px; line-height: 1.35; }
+.variant, .line, .tier { border-radius: var(--radius-sm); transition: box-shadow .15s var(--ease), border-color .15s var(--ease); }
+.variant:hover, .tier:hover { box-shadow: var(--shadow-1); border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); }
+.note { line-height: 1.5; padding-left: 10px; border-left: 2px solid var(--line); }
+.banner { border-radius: var(--radius-sm); }
+
+/* Tablas: cabecera fija al desplazar, filas con foco al pasar el ratón, menos ruido */
+.panel { max-height: none; }
+table { font-size: 14px; }
+thead th { background: var(--panel); border-bottom: 2px solid var(--line); padding-top: 6px; padding-bottom: 8px; position: sticky; top: 0; z-index: 1; }
+tbody tr { transition: background-color .12s var(--ease); }
+tbody tr:hover td { background: var(--hover); }
+tbody tr:last-child td { border-bottom: 0; }
+td { padding: 9px 8px; }
+th { padding-left: 8px; padding-right: 8px; }
+tr.click:hover td { background: var(--accent-soft); }
+td.n { font-feature-settings: "tnum"; }
+.cn, a.plink, .linklike { transition: color .12s var(--ease); }
+.bar, .track { height: 8px; }
+.bar i, .track i, .share span { transition: width .4s var(--ease); }
+
+/* Pestañas */
+.tabs { gap: 4px; margin-top: 20px; scrollbar-width: thin; }
+.tabs button { padding: 11px 16px; border-radius: 8px 8px 0 0; font-size: 14.5px; }
+.tabs button:hover { background: var(--hover); }
+.tabs button[aria-selected=true] { color: var(--accent); }
+.subtabs button { font-size: 14px; }
+.subtabs button.on, .seg button.on { box-shadow: 0 1px 4px color-mix(in srgb, var(--accent) 40%, transparent); }
+
+/* Chips y etiquetas */
+.chip, .tchip, .eff, .tag { transition: border-color .12s var(--ease), background-color .12s var(--ease); }
+.chip[data-card], .chip[data-cmd] { cursor: pointer; }
+.chip:hover { border-color: var(--accent); background: var(--accent-soft); }
+.tag { background: var(--accent-soft); border-color: transparent; color: var(--accent); font-weight: 600; }
+
+/* Accesos rápidos */
+.quick button { border-radius: var(--radius); box-shadow: var(--shadow-1); padding: 14px 16px; }
+.quick button:hover { transform: translateY(-2px); box-shadow: var(--shadow-2); }
+.quick b { font-size: 15px; }
+
+/* Cartas: elevación al pasar el ratón */
+.dcard { transition: transform .18s var(--ease), box-shadow .18s var(--ease); }
+.dcard:hover { transform: translateY(-3px) scale(1.02); box-shadow: 0 8px 20px rgba(0,0,0,.4); z-index: 2; }
+#cardpop { box-shadow: var(--shadow-2); }
+
+/* Transición suave al cambiar de vista */
+@keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+#app > * { animation: rise .25s var(--ease) both; }
+.tabpanel:not([hidden]) { animation: rise .2s var(--ease) both; }
+
+/* Detalles desplegables */
+details > summary { transition: color .12s var(--ease); }
+details > summary:hover { color: var(--accent); }
+details.panel > summary { font-size: 15px; }
+
+/* Barras de desplazamiento discretas */
+* { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--muted) 45%, transparent) transparent; }
+
+footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid var(--line); font-size: 12.5px; line-height: 1.6; }
+footer p { margin: 0 0 4px; }
+
+/* Móvil */
+@media (max-width: 640px) {
+  .wrap { padding-left: 12px; padding-right: 12px; }
+  header.top { margin: 0 -12px 10px; padding: 10px 12px; gap: 8px; }
+  header.top h1 { font-size: 17px; }
+  .gsearch { flex-basis: 100%; max-width: none; }
+  .panel { padding: 14px; border-radius: 12px; }
+  .tabs button { padding: 10px 12px; font-size: 14px; }
+  table { font-size: 13px; }
+  td, th { padding-left: 5px; padding-right: 5px; }
+  .tiles { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .tile .v { font-size: 22px; }
+  .seg button { padding: 6px 10px; }
+  html { scroll-padding-top: 110px; }
+}
+
+/* Respeta a quien prefiere menos movimiento */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}
+
+/* Tramos de uso de una carta */
+.tag.t-core { background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--accent); }
+.tag.t-usual { background: var(--accent-soft); color: var(--accent); }
+.tag.t-opt, .tag.t-tech { background: var(--bg); border-color: var(--line); color: var(--muted); font-weight: 500; }
+.subtabs button small { opacity: .7; margin-left: 2px; }

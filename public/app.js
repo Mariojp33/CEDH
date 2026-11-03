@@ -5,7 +5,7 @@ const pp = x => (x >= 0 ? '+' : '') + (x * 100).toFixed(1) + ' pts';
 const short = (s, n = 30) => s.length > n ? s.slice(0, n - 1) + '…' : s;
 
 // Filtro global por jugadores del torneo: se añade a todas las llamadas a la API.
-const F = { min: '', max: '', days: 90, dec: 1 }; // dec: 1 = los empates salen del cálculo del winrate
+const F = { min: '', max: '', days: 90, dec: 0 }; // dec: 0 = los empates cuentan como no ganadas (por defecto); 1 = salen del cálculo del winrate
 // Barra centrada en la referencia (la media del meta): verde a la derecha (mejor), roja a la izquierda (peor), escala ±`range`.
 // Con `neutral` (diferencia que no se distingue del azar) sale en gris.
 const track = (d, range, neutral = false) => `<div class="track"><i class="${neutral ? 'neu' : d >= 0 ? 'pos' : 'neg'}" style="width:${Math.min(50, Math.abs(d) / range * 50)}%"></i></div>`;
@@ -140,7 +140,7 @@ function readHash() {
   const h = new URLSearchParams(location.hash.slice(1));
   const d = Number(h.get('d'));
   if ([30, 90, 180].includes(d)) F.days = d;
-  if (h.get('dec') === '0') F.dec = 0;
+  if (h.get('dec') === '1') F.dec = 1;
   F.min = h.get('min') || ''; F.max = h.get('max') || '';
   $('#fmin').value = F.min; $('#fmax').value = F.max;
   const tab = h.get('t') || undefined;
@@ -394,7 +394,7 @@ async function loadThreats(el) {
   try {
     // Las cartas por función no dependen de Spellbook: salen enseguida aunque su servicio tarde o falle
     const th = await api(`/api/threats?name=${encodeURIComponent(el.dataset.rival)}`).catch(() => null);
-    const top = id => th ? (th.categories.find(c => c.id === id) || { cards: [] }).cards.filter(c => c.inclusion >= 0.4).slice(0, 4) : [];
+    const top = id => th ? (th.categories.find(c => c.id === id) || { cards: [] }).cards.filter(c => c.inclusion >= 0.4 && c.inclusion < 0.995).slice(0, 4) : [];
     const brief = [['Remates', 'finishers'], ['Esperar interacción', 'interaction']].map(([label, id]) => top(id).length
       ? `<div class="muted" style="margin-top:4px">${label}: ${top(id).map(c => `${cardBtn(c.card)} (${pct(c.inclusion, 0)})`).join(' · ')}</div>` : '').join('');
     el.innerHTML = `<h4 style="margin:12px 0 6px;font-size:13px">De qué preocuparse</h4>${brief}<div class="muted" style="margin-top:6px">Consultando sus combos…</div>`;
@@ -707,7 +707,7 @@ const guideHtml = () => `<div class="panel guide">
   <h3>Winrate, «pts» y la media del meta</h3>
   <p>El winrate es victorias entre partidas jugadas. Se compara con la <b>media del meta</b> del periodo elegido, no con el 25 % teórico de una mesa de 4, porque los empates (en torno a una de cada cinco partidas) hacen que la media real quede por debajo. Una diferencia de «+3 pts» son tres puntos porcentuales: un 28 % frente a una media del 25 %.</p>
   <h3>Empates</h3>
-  <p>Por defecto las partidas empatadas no cuentan (winrate = victorias ÷ victorias + derrotas) y la referencia ronda el 25 %. Puedes cambiarlo en los filtros para que cuenten como no ganadas. La tasa de empates se muestra aparte: es una característica estable de cada comandante.</p>
+  <p>Por defecto un empate cuenta como partida no ganada (winrate = victorias ÷ todas las partidas), por eso la media del meta queda por debajo del 25 %. Puedes cambiarlo en los filtros para que los empates salgan del cálculo (winrate = victorias ÷ victorias + derrotas, con la referencia en torno al 25 %). La tasa de empates se muestra aparte: es una característica estable de cada comandante.</p>
   <h3>Intervalos y colores</h3>
   <p>Cada winrate tiene un intervalo de confianza del 95 %. Solo se pinta de verde o rojo cuando ese intervalo queda entero por encima o por debajo de la media; en <b>gris</b> no se distingue de ella, normalmente por falta de partidas. Los niveles S-D de «Meta» salen de ese mismo intervalo, así que un mazo con pocas partidas no sube por suerte.</p>
   <h3>Lo que esta web no prueba</h3>
@@ -1450,7 +1450,9 @@ async function openCommander(name, minWith = 5) {
         <label class="sr" for="cq">Filtrar carta</label>
         <input type="search" id="cq" placeholder="Filtrar carta…">
         <div id="ce-out"></div>
-        <table style="margin-top:12px"><thead><tr><th>Carta</th><th class="n">Inclusión</th><th class="n">Winrate con ella</th><th class="n">Diferencia</th><th></th></tr></thead><tbody id="crows"></tbody></table>
+        <div class="subtabs" id="ctiers" role="group" aria-label="Filtrar por frecuencia de uso" style="margin-top:10px"></div>
+        <div class="muted" id="hidden-all"></div>
+        <table style="margin-top:8px"><thead><tr><th>Carta</th><th>Uso</th><th class="n" title="Mazos de este comandante que la llevan">Mazos</th><th class="n" title="% de los mazos de este comandante que la llevan (playrate)">Inclusión</th><th class="n" title="Winrate de los mazos que la llevan. En gris salvo que su intervalo de confianza quede entero por encima o por debajo de la media del meta">Winrate con ella</th><th class="n" title="Frente a los mazos que no la llevan. Solo se colorea si es llamativa (|z| ≥ 2)">Diferencia</th><th></th></tr></thead><tbody id="crows"></tbody></table>
       </div>
       <details class="panel assoc">
         <summary><b>Cartas asociadas a más y a menos winrate</b> <span class="muted">· orientativo: correlación, no causalidad</span></summary>
@@ -1533,15 +1535,37 @@ async function openCommander(name, minWith = 5) {
   $('#cmp').onchange = e => e.target.value && openCompare(name, e.target.value);
   $('#vk').onchange = e => loadVariants(name, Number(e.target.value));
   $('#min').onchange = e => openCommander(name, Number(e.target.value));
+  // Tramos de uso: permiten ver de un vistazo qué es núcleo y qué es opcional sin romper el orden por columnas.
+  const TIERS = [['core', 'Núcleo', 0.8, 'las lleva el 80 % o más'], ['usual', 'Habituales', 0.4, '40–80 %'], ['opt', 'Opcionales', 0.1, '10–40 %'], ['tech', 'Tech', 0, 'menos del 10 %']];
+  const tierOf = c => TIERS.find(t => c.inclusion >= t[2]);
+  const shown = r.popular.filter(c => c.inclusion < 0.995);   // las del 100 % (el propio comandante) no informan
+  let tierSel = '';
+  const drawTiers = () => {
+    const n = id => shown.filter(c => tierOf(c)[0] === id).length;
+    $('#ctiers').innerHTML = [['', 'Todas', shown.length, ''], ...TIERS.map(t => [t[0], t[1], n(t[0]), t[3]])]
+      .map(([id, label, k, hint]) => `<button type="button" data-tier="${id}" class="${tierSel === id ? 'on' : ''}" aria-pressed="${tierSel === id}"${hint ? ` title="${hint}"` : ''}>${label} <small>${k}</small></button>`).join('');
+  };
   const drawCards = () => {
     const q = $('#cq').value.toLowerCase();
-    $('#crows').innerHTML = r.popular.filter(c => c.card.toLowerCase().includes(q)).slice(0, 150).map(c => `
-      <tr><td>${cn(c.card)} ${c.core ? '<span class="tag">core</span>' : ''}</td><td class="n">${pct(c.inclusion, 0)}</td>
-      <td class="n">${pct(c.winRateWith)}</td>
-      <td class="n ${c.lift == null ? 'muted' : c.lift >= 0 ? 'pos-t' : 'neg-t'}">${c.lift == null ? '—' : pp(c.lift)}</td>
-      <td><button type="button" class="ghost" data-evo="${esc(c.card)}" title="Cómo ha evolucionado el winrate con esta carta en los últimos 6 meses">Evolución</button></td></tr>`).join('');
+    const hidden = r.popular.length - shown.length;
+    $('#hidden-all').textContent = hidden ? `Se ocultan ${hidden} carta${hidden > 1 ? 's' : ''} que llevan el 100 % de los mazos (el propio comandante o su compañero).` : '';
+    const rows = shown.filter(c => (!tierSel || tierOf(c)[0] === tierSel) && c.card.toLowerCase().includes(q));
+    $('#crows').innerHTML = rows.slice(0, 150).map(c => {
+      const few = c.decks < minWith;                       // con tan pocos mazos el winrate no dice nada
+      const wTone = few ? 'muted' : tone(sig(c.ci, r.baseline));
+      const dTone = c.lift == null || c.z == null || Math.abs(c.z) < 2 ? 'muted' : c.lift >= 0 ? 'pos-t' : 'neg-t';
+      return `<tr><td>${cn(c.card)}</td>
+      <td><span class="tag t-${tierOf(c)[0]}">${tierOf(c)[1].replace(/s$/, '')}</span></td>
+      <td class="n muted">${c.decks}</td>
+      <td class="n"><div class="share">${pct(c.inclusion, 0)}<span style="width:${Math.round(c.inclusion * 60)}px"></span></div></td>
+      <td class="n ${wTone}" ${few ? '' : `title="IC 95 %: ${pct(c.ci[0], 0)}–${pct(c.ci[1], 0)} · ${c.games} partidas"`}>${few ? '<span title="Muy pocos mazos para dar un winrate">—</span>' : pct(c.winRateWith)}</td>
+      <td class="n ${dTone}">${c.lift == null ? '—' : pp(c.lift)}</td>
+      <td><button type="button" class="ghost" data-evo="${esc(c.card)}" title="Cómo ha evolucionado el winrate con esta carta en los últimos 6 meses">Evolución</button></td></tr>`;
+    }).join('') || '<tr><td colspan="7" class="muted">Ninguna carta coincide.</td></tr>';
     sortTable($('#crows').closest('table'));
   };
+  $('#ctiers').onclick = e => { const b = e.target.closest('[data-tier]'); if (!b) return; tierSel = b.dataset.tier; drawTiers(); drawCards(); };
+  drawTiers();
   $('#cq').oninput = drawCards; drawCards();
   $('#crows').onclick = e => { const b = e.target.closest('[data-evo]'); if (b) loadCardEvo(name, b.dataset.evo); };
   window.scrollTo(0, 0);
