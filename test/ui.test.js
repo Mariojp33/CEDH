@@ -42,12 +42,27 @@ async function scenario(name) {
     out.apartado = (document.querySelector('[data-sub].on') || {}).textContent;
     return out;
   }
+  if (name === 'mobile') {                     // ninguna pantalla debe desbordar en horizontal en un móvil
+    const ancho = () => document.documentElement.scrollWidth - window.innerWidth;
+    out.ancho = window.innerWidth; out.desbordes = {};
+    const mide = async nombre => { await wait(1500); const d = ancho(); if (d > 1) out.desbordes[nombre] = d; };
+    for (const b of $$('.tabs [role=tab]')) { b.click(); await mide(b.textContent.trim()); }
+    document.getElementById('tab-mazos').click(); await until(() => document.querySelector('#rows tr'));
+    document.querySelector('#rows tr').click(); await until(() => document.querySelector('.head h2'));
+    await mide('ficha de comandante');
+    return out;
+  }
   out.cabecera = { buscador: !!document.getElementById('gq'), resumen: document.getElementById('fsum').textContent };
   out.inicio = tabs('.tabs');
   const filas = () => $$('#rows tr').length;
   const pocos = Number(document.getElementById('nfew').textContent);
   const antes = filas(); document.getElementById('showall').click();
   out.pocosMazos = { ocultos: pocos, antes, despues: filas() }; document.getElementById('showall').click();
+  // Filtro por colores (con Scryfall simulado todos salen incoloros)
+  document.querySelector('[data-col=C]').click();
+  await until(() => document.getElementById('colornote').textContent.includes('exactamente'));
+  out.colores = { filas: filas(), nota: document.getElementById('colornote').textContent };
+  document.querySelector('[data-col=C]').click();
   // Meta con sus apartados
   document.getElementById('tab-meta').click();
   await until(() => document.querySelector('#meta .tier'));
@@ -199,7 +214,7 @@ async function scenario(name) {
 
 // Chrome se maneja por el protocolo de depuración: se abre la página y se espera (en tiempo real) a que el guion deje su resultado.
 // Es asíncrono a propósito: el proxy vive en este mismo proceso y debe poder responder mientras Chrome carga la página.
-async function chromeRun(url, maxMs = 150000) {
+async function chromeRun(url, maxMs = 150000, mobileWidth = 0) {
   const port = 9300 + (process.pid % 500);
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'cedh-chrome-'));
   const chrome = spawn(CHROME, ['--headless=new', '--no-sandbox', '--disable-gpu', `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, '--window-size=1280,900', 'about:blank'], { stdio: 'ignore' });
@@ -215,6 +230,11 @@ async function chromeRun(url, maxMs = 150000) {
     let seq = 0; const pending = new Map();
     ws.onmessage = e => { const m = JSON.parse(e.data); const f = pending.get(m.id); if (f) { pending.delete(m.id); f(m.result); } };
     const ev = expression => new Promise(r => { const id = ++seq; pending.set(id, r); ws.send(JSON.stringify({ id, method: 'Runtime.evaluate', params: { expression, returnByValue: true } })); });
+    if (mobileWidth) {          // se emula un móvil y se recarga para que la página arranque ya con ese ancho
+      await ev('0');
+      await new Promise(r => { const id = ++seq; pending.set(id, r); ws.send(JSON.stringify({ id, method: 'Emulation.setDeviceMetricsOverride', params: { width: mobileWidth, height: 800, deviceScaleFactor: 1, mobile: true } })); });
+      await ev('location.reload()');
+    }
     const t0 = Date.now();
     while (Date.now() - t0 < maxMs) {
       const r = await ev(`(document.getElementById('result') || {}).textContent || ''`);
@@ -252,6 +272,7 @@ test('interfaz: recorrido por secciones, buscador único, ficha y «Revisar mi l
   assert.ok(r.pocosMazos.ocultos > 0 && r.pocosMazos.despues === r.pocosMazos.antes + r.pocosMazos.ocultos, 'la casilla añade a la tabla los comandantes con menos de 5 mazos');
   assert.match(r.cabecera.resumen, /Filtros · 3 meses · empates cuentan como no ganadas/);
   assert.deepStrictEqual(r.meta.apartados, ['Panorama', 'Novedades de cartas']);
+  assert.ok(r.colores.filas > 0 && /exactamente/.test(r.colores.nota), 'el filtro por colores deja comandantes');
   assert.ok(r.meta.niveles >= 3 && /t=meta&s=panorama/.test(r.meta.hash.replace(/&amp;/g, '&')));
   assert.ok(r.novedades.cargado && /s=novedades/.test(r.novedades.hash));
   assert.deepStrictEqual(r.torneos.apartados, ['Torneos', 'Buscar listas top', 'Jugadores']);
@@ -300,4 +321,11 @@ test('interfaz: los enlaces antiguos llevan a la pestaña y apartado nuevos', { 
     assert.strictEqual(r.pestaña, tab, 'enlace antiguo ' + old);
     assert.strictEqual(r.apartado, sub, 'enlace antiguo ' + old);
   }
+});
+
+test('interfaz: en un móvil ninguna pantalla desborda en horizontal', { skip: SKIP, timeout: 180000 }, async () => {
+  const r = await chromeRun(`http://localhost:${PROXY}/_ui.html?s=mobile#d=90`, 150000, 390);
+  assert.deepStrictEqual(r.errs, []);
+  assert.ok(r.ancho <= 500, 'el móvil no se emuló: ancho ' + r.ancho);
+  assert.deepStrictEqual(r.desbordes, {}, 'pantallas que se salen del ancho de ' + r.ancho + ' px');
 });

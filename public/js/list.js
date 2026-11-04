@@ -7,6 +7,7 @@ import { loadHighlights, loadMeta, loadNovelties } from './meta.js';
 import { bindReviewList } from './mylist.js';
 import { bindTabs, goTab, pickTab, subTabs, tabPanel, tabsHtml, writeHash } from './nav.js';
 import { bindPlayers, bindRegulars, bindTeams, playersHtml, regularsHtml, teamsHtml } from './players.js';
+import { colorsOf, loadColors } from './visual.js';
 import { sortTable } from './sorttable.js';
 import { bindTableTool } from './table.js';
 import { bindTopDecks, bindTournaments, topDecksHtml, torneosHtml } from './tournaments.js';
@@ -42,6 +43,11 @@ export function renderList() {
       <label class="sr" for="q">Filtrar la lista de comandantes</label>
       <input type="search" id="q" placeholder="Filtrar la lista de comandantes…">
       <label class="muted" style="display:inline-flex;gap:6px;align-items:center;margin-top:8px"><input type="checkbox" id="showall"> Mostrar también los de menos de ${MIN_TABLE} mazos (<span id="nfew"></span>)</label>
+      <div class="colorpick" id="colorpick" role="group" aria-label="Filtrar por colores">
+        <span class="muted">Colores:</span>
+        ${[['W', 'Blanco'], ['U', 'Azul'], ['B', 'Negro'], ['R', 'Rojo'], ['G', 'Verde'], ['C', 'Incoloro']].map(([k, n]) => `<button type="button" class="cbtn" data-col="${k}" aria-pressed="false" title="${n}"><i class="p${k}"></i>${n}</button>`).join('')}
+        <small class="muted" id="colornote"></small>
+      </div>
       <table style="margin-top:12px"><thead><tr>
         <th>Comandante</th><th class="n">Mazos</th><th class="n">Presencia en el meta</th><th>Winrate <small class="muted">· media ${pct(F.meta)}</small></th><th class="n">vs media</th><th class="n" title="Partidas empatadas sobre el total">Empates</th>
       </tr></thead><tbody id="rows"></tbody></table>
@@ -81,10 +87,13 @@ export function renderList() {
     <div id="cs-out"></div>`) +
     tabPanel('mas', active, `<div id="mas-host"></div>`);
   const maxShare = Math.max(0.001, ...ui.commanders.map(c => c.metaShare));
+  const picked = new Set();
+  // Colores marcados: se enseñan los comandantes cuya identidad es exactamente esa combinación (W+U = solo azul-blanco)
+  const colorOk = c => { if (!picked.size) return true; const ci = colorsOf(c.commander); if (!ci) return false; const key = ci.length ? ci : ['C']; return key.length === picked.size && key.every(k => picked.has(k)); };
   const draw = () => {
     const q = $('#q').value.toLowerCase(), all = $('#showall').checked;
     // Con texto en el filtro se buscan todos; sin él, la tabla enseña solo los de muestra razonable (salvo que se pida lo contrario)
-    $('#rows').innerHTML = ui.commanders.filter(c => c.commander.toLowerCase().includes(q) && (all || q || c.decks >= MIN_TABLE)).map(c => `
+    $('#rows').innerHTML = ui.commanders.filter(c => c.commander.toLowerCase().includes(q) && colorOk(c) && (all || q || picked.size || c.decks >= MIN_TABLE)).map(c => `
       <tr class="click${sig(c.ci, F.meta) > 0 ? ' hi-pos' : sig(c.ci, F.meta) < 0 ? ' hi-neg' : ''}" data-c="${esc(c.commander)}" tabindex="0" role="link" aria-label="Abrir ${esc(c.commander)}">
         <td>${cn(c.commander)}${c.decks < MIN_TABLE ? ' <span class="few" title="Muestra pequeña: winrate poco fiable">muestra pequeña</span>' : ''}</td><td class="n">${c.decks}</td>
         <td><div class="share">${pct(c.metaShare)}<span style="width:${Math.min(100, c.metaShare / maxShare * 60)}px"></span></div></td>
@@ -97,6 +106,19 @@ export function renderList() {
   loadHighlights($('#hl'));
   $('#nfew').textContent = ui.commanders.filter(c => c.decks < MIN_TABLE).length;
   $('#showall').onchange = draw;
+  $('#colorpick').onclick = async e => {
+    const b = e.target.closest('[data-col]'); if (!b) return;
+    const k = b.dataset.col, on = !picked.has(k);
+    on ? picked.add(k) : picked.delete(k);
+    b.setAttribute('aria-pressed', String(on));
+    if (picked.size && ui.commanders.some(c => !colorsOf(c.commander))) {
+      $('#colornote').textContent = 'Cargando colores…';
+      await loadColors(ui.commanders.map(c => c.commander));
+      $('#colornote').textContent = '';
+    }
+    draw();
+    $('#colornote').textContent = picked.size ? 'Se muestran los comandantes con exactamente esos colores.' : '';
+  };
   $('#q').oninput = draw; draw();
   const open = e => { const tr = e.target.closest('tr'); if (tr) { ui.view.tab = undefined; openCommander(tr.dataset.c); } };
   $('#rows').onclick = open;

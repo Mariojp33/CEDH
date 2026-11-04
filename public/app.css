@@ -517,8 +517,8 @@ header.top .ver { font-size: 11px; font-weight: 500; color: var(--muted); border
   background: var(--line) center 22% / cover no-repeat; box-shadow: 0 0 0 1px var(--line); }
 .pips { display: inline-flex; gap: 2px; margin-left: 6px; vertical-align: middle; }
 .pips i { width: 9px; height: 9px; border-radius: 50%; box-shadow: 0 0 0 1px rgba(0,0,0,.28) inset; }
-.pips .pW { background: #f3ecc8; } .pips .pU { background: #3b86c8; } .pips .pB { background: #4a4046; }
-.pips .pR { background: #d4503a; } .pips .pG { background: #3a9b5c; } .pips .pC { background: #b9b6ae; }
+.pips .pW, .cbtn .pW { background: #f3ecc8; } .pips .pU, .cbtn .pU { background: #3b86c8; } .pips .pB, .cbtn .pB { background: #4a4046; }
+.pips .pR, .cbtn .pR { background: #d4503a; } .pips .pG, .cbtn .pG { background: #3a9b5c; } .pips .pC, .cbtn .pC { background: #b9b6ae; }
 .kpi b { display: flex; align-items: center; flex-wrap: wrap; }
 .tchip { display: inline-flex; align-items: center; flex-wrap: wrap; }
 table.mcards td:first-child .av { margin-right: 6px; }
@@ -573,3 +573,9 @@ details.sect { margin-bottom: 12px; }
 details.sect > summary { cursor: pointer; padding: 12px 16px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-1); font-weight: 600; font-size: 15px; }
 details.sect[open] > summary { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
 details.sect > .panel { border-top: 0; border-top-left-radius: 0; border-top-right-radius: 0; margin-bottom: 0; }
+
+/* Filtro por colores en Mazos */
+.colorpick { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 10px; }
+.cbtn { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px 3px 6px; border-radius: 99px; border: 1px solid var(--line); background: var(--bg); color: var(--ink, inherit); font-size: 13px; cursor: pointer; }
+.cbtn i { width: 11px; height: 11px; border-radius: 50%; box-shadow: 0 0 0 1px rgba(0,0,0,.28) inset; }
+.cbtn[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; font-weight: 600; }

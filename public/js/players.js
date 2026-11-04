@@ -68,10 +68,15 @@ function playerHtml(r) {
   const base = r.meta;
   const rel = r.winRate == null ? '' : r.ci[0] > base ? 'pos-t' : r.ci[1] < base ? 'neg-t' : 'muted';
   const lk = r.luck;
+  const says = r.winRate == null ? 'Sin partidas con ganador en este periodo.'
+    : few ? `Solo ${r.games} partidas: todavía no se puede decir si rinde mejor o peor que la media.`
+    : `${rel === 'pos-t' ? 'Rinde por encima de la media' : rel === 'neg-t' ? 'Rinde por debajo de la media' : 'Rinde como la media del meta'}: gana el ${pct(r.winRate)} de sus partidas frente al ${pct(base)} del meta.`
+    + (r.luck ? ` Ha llegado ${r.luck.cut} ${r.luck.cut === 1 ? 'vez' : 'veces'} al top cut (por azar saldrían unas ${r.luck.expectedCut.toFixed(1).replace('.', ',')}).` : '');
   const vs = (a, e) => `<b>${a}</b> <span class="muted">(por azar se esperarían ${e.toFixed(e < 1 ? 2 : 1).replace('.', ',')})</span>`;
   return `<div class="panel">
     <h2>${esc(r.name)}</h2>
     <div class="muted">${r.aliases.length > 1 ? `También aparece como: ${r.aliases.filter(a => a !== r.name).map(esc).join(', ')} · ` : ''}${r.tournaments} ${r.tournaments === 1 ? 'torneo' : 'torneos'} · ${r.decks} ${r.decks === 1 ? 'mazo' : 'mazos'} · de ${days(r.firstDate)} a ${days(r.lastDate)}</div>
+    <p class="verdict">${says}</p>
     <div class="tiles" style="margin-top:12px">
       <div class="tile"><div class="v ${rel}">${r.winRate == null ? '—' : pct(r.winRate)}</div><div class="l">winrate (probablemente entre ${pct(r.ci[0])} y ${pct(r.ci[1])}) · media del meta ${pct(base)}</div></div>
       <div class="tile"><div class="v">${r.games}</div><div class="l">partidas${F.dec ? ' con ganador' : ''} · ${r.wins} victorias</div></div>

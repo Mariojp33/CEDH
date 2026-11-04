@@ -36,6 +36,37 @@ function want(name, fn) {
   waiting.get(name).push(fn); pump();
 }
 
+// Identidades de color de muchos comandantes de golpe (75 por petición): sirve para el filtro por colores de «Mazos».
+// Los que Scryfall no encuentra quedan sin color conocido y no entran en el filtro.
+export async function loadColors(names) {
+  const parts = [...new Set(names.flatMap(n => n.split(' / ')))].filter(n => !(n in store));
+  for (let i = 0; i < parts.length; i += 75) {
+    const chunk = parts.slice(i, i + 75);
+    try {
+      const r = await fetch('https://api.scryfall.com/cards/collection', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifiers: chunk.map(name => ({ name })) }),
+      });
+      if (!r.ok) continue;
+      const j = await r.json(), by = new Map();
+      for (const c of j.data || []) { by.set(c.name.toLowerCase(), c); by.set(c.name.split(' // ')[0].toLowerCase(), c); }
+      for (const n of chunk) {
+        const c = by.get(n.toLowerCase()); if (!c) continue;
+        const face = (c.image_uris ? c : (c.card_faces || [])[0]) || {};
+        store[n] = { art: face.image_uris && face.image_uris.art_crop || null, ci: c.color_identity || [] };
+        dirty = true;
+      }
+    } catch { /* sin red: el filtro simplemente no encuentra esos comandantes */ }
+    await new Promise(r => setTimeout(r, 120));
+  }
+  save();
+}
+// Colores de un comandante (o pareja «A / B») ya conocidos, o null si no se sabe
+export function colorsOf(name) {
+  const infos = name.split(' / ').map(n => store[n]);
+  return infos.every(Boolean) ? [...new Set(infos.flatMap(x => x.ci))] : null;
+}
+
 const COLORS = ['W', 'U', 'B', 'R', 'G'];
 function pips(ci) {
   const dots = (ci.length ? COLORS.filter(c => ci.includes(c)) : ['C']).map(c => '<i class="p' + c + '"></i>').join('');

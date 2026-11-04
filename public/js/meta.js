@@ -56,7 +56,11 @@ export async function loadMeta() {
     const byName = n => r.commanders.find(c => c.commander === n);
     const up = upA ? { ...byName(upA.commander), change: upA.change } : { change: 0 }, down = downA ? { ...byName(downA.commander), change: downA.change } : { change: 0 };
     const tile = (label, c, val, cls = '') => c ? `<div class="kpi"><small>${label}</small><b>${cmdBtn(c.commander)}</b><span class="${cls}">${val}</span></div>` : '';
+    const says = `El comandante más jugado es ${cmdLabel(most.commander)} (${pct(most.series[n - 1], 1)} de los mazos del último periodo)`
+      + (best ? ` y el de mejor winrate entre los que tienen datos de sobra es ${cmdLabel(best.commander)} (${pct(best.winRate)} frente a una media de ${pct(r.mean)}).` : '.')
+      + ((r.alerts || []).length ? ` Hay ${r.alerts.length} ${r.alerts.length === 1 ? 'cambio claro' : 'cambios claros'} en el último periodo.` : ' No hay cambios claros en el último periodo.');
     box.innerHTML = `
+      <p class="verdict">${says}</p>
       <div class="kpis">
         ${tile('Más jugado', most, `${pct(most.series[n - 1], 1)} del meta`)}
         ${tile('Mejor winrate', best, best && `${pct(best.winRate)} · ${best.decks} mazos`, 'pos-t')}
