@@ -4,3 +4,6 @@ node_modules/
 # claves locales
 env.local
 .env.local
+
+# datos: el seed se publica como archivo de la release «seed» (no va en el repositorio)
+seed/

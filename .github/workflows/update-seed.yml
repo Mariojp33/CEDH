@@ -30,16 +30,17 @@ jobs:
         with:
           node-version: 20
 
-      # Parte del seed publicado en la release (si existe); si no, del que hay en el repositorio
+      # Parte del seed publicado en la release (si existe); si no, se descarga todo desde cero
       - name: Recuperar el último seed publicado
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          mkdir -p seed
           if gh release download seed --pattern records.json --output /tmp/records.json --repo "$GITHUB_REPOSITORY" 2>/dev/null; then
             cp /tmp/records.json seed/records.json
             echo "Se parte del seed publicado en la release."
           else
-            echo "No hay release «seed» todavía: se parte del seed del repositorio."
+            echo "No hay release «seed» todavía: se descargará todo desde cero."
           fi
 
       - name: Descargar los días nuevos y renovar el seed

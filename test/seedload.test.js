@@ -16,11 +16,15 @@ const get = (port, p) => new Promise((resolve, reject) => {
   http.get({ port, path: p }, res => { const c = []; res.on('data', d => c.push(d)); res.on('end', () => resolve({ status: res.statusCode, body: Buffer.concat(c).toString() })); }).on('error', reject);
 });
 
+// Copia local de respaldo sintética (seed/ no está en git): se crea una vez y se pasa por SEED_FILE
+const LOCAL_SEED = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'cedh-local-')), 'records.json');
+cache.writeStream(fs, LOCAL_SEED, { updatedAt: '2020-01-01T00:00:00.000Z', days: 180, excluded: [] }, buildRecords(mockTournaments()).slice(0, 3000));
+
 // Arranca el servidor SIN clave y sin MOCK; devuelve su log y un método para pararlo
 async function start(port, env, before) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cedh-load-'));
   if (before) before(dir);                                // para dejar una caché previa en la carpeta de datos
-  const e = { ...process.env, PORT: String(port), DATA_DIR: dir, ...env };
+  const e = { ...process.env, PORT: String(port), DATA_DIR: dir, SEED_FILE: LOCAL_SEED, ...env };
   delete e.TOPDECK_API_KEY; delete e.MOCK;
   const child = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], { env: e, stdio: ['ignore', 'pipe', 'pipe'] });
   let log = '';
@@ -30,18 +34,18 @@ async function start(port, env, before) {
 }
 
 test('sin TOPDECK_API_KEY el servidor no se cae: sirve el seed y avisa de que no se actualiza', async () => {
-  const s = await start(4101, { SEED_URL: '' });          // sin descarga remota: usa la copia del repositorio
+  const s = await start(4101, { SEED_URL: '' });          // sin descarga remota: usa la copia local
   try {
     const st = JSON.parse((await get(4101, '/api/status')).body);
     assert.ok(st.decks > 1000, 'responde con datos del seed');
     assert.match(String(st.error), /Sin clave de TopDeck/);
     assert.match(s.log(), /Falta TOPDECK_API_KEY/);
-    assert.match(s.log(), /copia del repositorio/);
+    assert.match(s.log(), /copia local/);
     assert.strictEqual((await get(4101, '/api/commanders?days=90')).status, 200);
   } finally { s.stop(); }
 });
 
-test('al arrancar descarga el seed publicado y lo prefiere al del repositorio', async () => {
+test('al arrancar descarga el seed publicado y lo prefiere a la copia local', async () => {
   // «Release» simulada: un seed pequeño reconocible (mazos de demostración con una fecha de datos propia)
   const recs = buildRecords(mockTournaments()).slice(0, 3000);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cedh-rel-'));
@@ -60,7 +64,7 @@ test('al arrancar descarga el seed publicado y lo prefiere al del repositorio', 
   } finally { s.stop(); srv.close(); fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('si el seed publicado no existe o está roto, se usa el del repositorio', async () => {
+test('si el seed publicado no existe o está roto, se usa la copia local', async () => {
   for (const [port, mode] of [[4104, '404'], [4106, 'roto']]) {
     const srv = http.createServer((req, res) => {
       if (mode === '404') { res.writeHead(404); return res.end('no existe'); }
@@ -70,7 +74,7 @@ test('si el seed publicado no existe o está roto, se usa el del repositorio', a
     const s = await start(port + 10, { SEED_URL: `http://localhost:${port + 1}/records.json` });
     try {
       assert.match(s.log(), /No se pudo usar el origen \(seed descargado de GitHub\)/);
-      assert.match(s.log(), /Caché cargada \(copia del repositorio\)/);
+      assert.match(s.log(), /Caché cargada \(copia local\)/);
       assert.strictEqual((await get(port + 10, '/api/status')).status, 200);
     } finally { s.stop(); srv.close(); }
   }
@@ -80,7 +84,7 @@ test('si no hay conexión con el seed publicado, el arranque no se queda esperan
   const t = Date.now();
   const s = await start(4120, { SEED_URL: 'http://localhost:9/records.json' });   // puerto cerrado
   try {
-    assert.match(s.log(), /Caché cargada \(copia del repositorio\)/);
+    assert.match(s.log(), /Caché cargada \(copia local\)/);
     assert.ok(Date.now() - t < 10000, 'arranca en menos de 10 s');
   } finally { s.stop(); }
 });
@@ -110,7 +114,7 @@ test('una caché sin posiciones se descarta si el seed publicado las trae', asyn
 });
 
 test('si ningún origen tiene posiciones se usa el primero válido (la caché) en vez de fallar', async () => {
-  const s = await start(4106, { SEED_URL: '' }, d => oldCache(d, '2029-05-05T00:00:00.000Z'));
+  const s = await start(4106, { SEED_URL: '', SEED_FILE: path.join(os.tmpdir(), 'no-existe-seed.json') }, d => oldCache(d, '2029-05-05T00:00:00.000Z'));
   try {
     const st = JSON.parse((await get(4106, '/api/status')).body);
     assert.strictEqual(st.updatedAt, '2029-05-05T00:00:00.000Z', 'se quedó con la caché, que tiene prioridad');

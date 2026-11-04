@@ -1,5 +1,5 @@
 'use strict';
-// Crea seed/records.json a partir de la caché local (data/records.json) para incluirla en el repositorio.
+// Crea seed/records.json a partir de la caché local (data/records.json) como copia local de respaldo (seed/ está en .gitignore).
 //   node scripts/make-seed.js [--days 180] [--from ruta/records.json]
 // Úsalo con la caché de tu ordenador ya actualizada; el servidor en Render la cargará al arrancar.
 const fs = require('node:fs');

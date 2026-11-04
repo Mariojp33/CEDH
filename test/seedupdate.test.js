@@ -114,3 +114,14 @@ test('updateSeed: si el seed tiene mazos sin posición final, descarga todo el p
     assert.ok(asked.days < 10);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('updateSeed: sin seed previo (la carpeta seed/ no va en git) parte de cero y descarga todo el periodo', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cedh-seed-'));
+  try {
+    const file = path.join(dir, 'nueva', 'records.json');   // ni el archivo ni la carpeta existen
+    let asked = null;
+    await updateSeed({ file, apiKey: 'k', maxDays: 180, fetchTournaments: async o => { asked = o; }, now: Date.now(), log: () => {}, minKeep: 0 });
+    assert.strictEqual(asked.days, 180);
+    assert.strictEqual(JSON.parse(fs.readFileSync(file, 'utf8')).days, 180);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
