@@ -34,7 +34,7 @@ export function bindMyList(name) {
         <div class="variant" style="margin-bottom:6px">
           <h3>Variante ${v.index + 1} de ${v.total}: ${esc(short(v.signature.slice(0, 2).map(c => c.card).join(' + ') || 'sin rasgos claros', 60))}</h3>
           <div>Llevas <b>${v.typical.have} de las ${v.typical.total}</b> cartas típicas (las juega la mitad o más) de esta variante.</div>
-          <div class="muted" style="margin-top:4px">${v.decks} mazos (${pct(v.share, 0)} del total) · winrate ${pct(v.winRate)} (IC 95 %: ${pct(v.ci[0])}–${pct(v.ci[1])}) · ${pp(v.winRate - v.baseline)} frente a la media del meta</div>
+          <div class="muted" style="margin-top:4px">${v.decks} mazos (${pct(v.share, 0)} del total) · winrate ${pct(v.winRate)} (probablemente entre ${pct(v.ci[0])} y ${pct(v.ci[1])}) · ${pp(v.winRate - v.baseline)} frente a la media del meta</div>
           <div class="cols" style="margin-top:10px">
             <div><b>Cartas típicas que no llevas</b>${chips(v.missing, 'Llevas todas las cartas típicas de esta variante.')}</div>
             <div><b>Cartas tuyas que casi nadie de esta variante juega</b>${chips(v.extra, 'Ninguna: todas tus cartas aparecen en esta variante.')}</div>

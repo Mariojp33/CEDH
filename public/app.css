@@ -564,3 +564,6 @@ a { color: var(--accent); }
 .ghost, button.primary, .linklike.chip, .tag { border-radius: 99px; }
 td a { text-decoration-thickness: 1px; text-underline-offset: 3px; }
 td .ghost { white-space: nowrap; }
+
+/* Frase de conclusión de la ficha */
+.verdict { margin-top: 10px; padding: 10px 14px; background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: var(--radius-sm); font-size: 15px; box-shadow: var(--shadow-1); }

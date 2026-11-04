@@ -39,6 +39,11 @@ export const rel = q => q == null ? '' : q < 0.05 ? '<span class="rel hi" title=
   : q < 0.25 ? '<span class="rel mid" title="q &lt; 25 %: indicio razonable">◐ media</span>'
   : '<span class="rel lo" title="Puede ser casualidad">○ baja</span>';
 
+// «¿Se nota o es ruido?» a partir de z (|z| >= 2 llamativo): palabras en vez de números; el valor exacto queda en el tooltip.
+export const sureness = z => {
+  const a = Math.abs(z), t = 'title="Valor exacto z = ' + z.toFixed(1) + '. Cerca de 0 no se distingue del azar; por encima de 2 (o por debajo de −2) es llamativo."';
+  return a >= 2 ? '<span class="rel hi" ' + t + '>● se nota</span>' : a >= 1 ? '<span class="rel mid" ' + t + '>◐ dudoso</span>' : '<span class="rel lo" ' + t + '>○ ruido</span>';
+};
 export const cmdLabel = name => name.includes(' / ') ? name.split(' / ').map(p => p.split(',')[0]).join(' + ') : short(name, 34);
 export const cmdBtn = (name, label) => `<button type="button" class="linklike" data-open-cmd="${esc(name)}" data-card="${esc(name)}" title="${esc(name)}">${esc(label ?? cmdLabel(name))}</button>`;
 export const cardBtn = name => `<button type="button" class="linklike" data-open-card="${esc(name)}" data-card="${esc(name)}">${esc(name)}</button>`;

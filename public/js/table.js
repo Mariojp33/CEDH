@@ -1,4 +1,4 @@
-import { $, F, api, cardBtn, cmdBtn, cmdLabel, ensureCommanders, esc, pct, pp, short, ui } from './core.js';
+import { $, F, api, cardBtn, cmdBtn, cmdLabel, ensureCommanders, esc, pct, pp, short, sureness, ui } from './core.js';
 import { store } from './nav.js';
 
 // ---- Preparar mesa ----
@@ -25,8 +25,13 @@ async function runTable() {
     const r = await api(`/api/table?me=${encodeURIComponent(me)}${rs.map((x, i) => x ? `&r${i + 1}=${encodeURIComponent(x)}` : '').join('')}`);
     const tone2 = x => x.z == null ? 'muted' : x.z >= 2 ? 'pos-t' : x.z <= -2 ? 'neg-t' : 'muted';
     const cell = (x, label) => !x.pods ? '<span class="muted">sin mesas</span>' : x.enough ? `${pct(x.winRate)}` : `<span class="muted" title="Menos de ${r.minPods} mesas">${pct(x.winRate)} · pocas</span>`;
-    const rows = r.rows.map(x => `<tr><td>${cmdBtn(x.rival)}</td><td class="n">${x.pods}</td><td class="n">${cell(x)}</td><td class="n muted">${x.winRateWithout == null ? '—' : pct(x.winRateWithout)}</td>
-      <td class="n ${tone2(x)}">${x.enough ? pp(x.lift) : '—'}</td><td class="n muted">${x.enough ? x.z.toFixed(1) : 'muestra insuficiente'}</td></tr>`).join('');
+    const rows = r.rows.map(x => `<tr><td>${cmdBtn(x.rival)}</td><td class="n">${x.pods}</td><td class="n" title="Sin él en la mesa: ${x.winRateWithout == null ? '—' : pct(x.winRateWithout)}">${cell(x)}</td>
+      <td class="n ${tone2(x)}">${x.enough ? pp(x.lift) : '—'}</td><td class="n">${x.enough ? sureness(x.z) : '<span class="muted">muestra insuficiente</span>'}</td></tr>`).join('');
+    // Conclusión en una frase
+    const known = r.rows.filter(x => x.enough), noted = known.filter(x => Math.abs(x.z) >= 2);
+    const conclusion = !known.length ? 'Hay pocas mesas con estos rivales para sacar una conclusión.'
+      : noted.length ? noted.map(x => 'Contra <b>' + esc(cmdLabel(x.rival)) + '</b> rinde <b class="' + (x.lift > 0 ? 'pos-t' : 'neg-t') + '">' + (x.lift > 0 ? 'mejor' : 'peor') + '</b> (' + pp(x.lift) + ')').join(' · ') + '. Con el resto, como de costumbre.'
+      : 'Contra estos rivales tu comandante rinde <b>como de costumbre</b>: ninguno cambia su winrate de forma clara.';
     const multi = r.any ? `<div style="margin-top:10px">
         <div>Mesas con <b>alguno</b> de ellos: <b>${r.any.pods}</b> · winrate ${r.any.winRate == null ? '—' : pct(r.any.winRate)} (sin ninguno: ${r.any.winRateWithout == null ? '—' : pct(r.any.winRateWithout)})</div>
         <div>Mesas con <b>todos a la vez</b>: <b>${r.all.pods}</b>${r.all.enough ? ` · winrate ${pct(r.all.winRate)}` : ` <span class="muted">(muy pocas para concluir nada)</span>`}</div></div>` : '';
@@ -41,10 +46,11 @@ async function runTable() {
     out.innerHTML = `
       <div class="panel">
         <h2>${cmdBtn(r.me, cmdLabel(r.me))} contra ${r.rows.map(x => esc(cmdLabel(x.rival))).join(', ')}</h2>
+        <div class="verdict" style="margin:0 0 10px">${conclusion}</div>
         <div class="muted" style="margin-bottom:8px">${r.pods} mesas de este comandante · winrate general ${pct(r.baseline)}</div>
-        <table><thead><tr><th>Rival en la mesa</th><th class="n">Mesas con él</th><th class="n">Winrate con él</th><th class="n">Sin él</th><th class="n">Diferencia</th><th class="n" title="z: cuántas veces mayor es la diferencia que lo que cabría por azar. Cerca de 0 = no se distingue del azar; por encima de 2 o por debajo de −2 es llamativo (solo entonces se colorea). Positivo = mejor con ese rival; negativo = peor.">z</th></tr></thead><tbody>${rows}</tbody></table>
+        <table><thead><tr><th>Rival en la mesa</th><th class="n">Mesas con él</th><th class="n">Winrate con él</th><th class="n" title="Frente a su winrate en mesas sin ese rival">Diferencia</th><th class="n" title="¿La diferencia es real o puede ser casualidad? «Se nota» = es llamativa; «ruido» = no se distingue del azar.">¿Fiable?</th></tr></thead><tbody>${rows}</tbody></table>
         ${multi}
-        <div class="note">Los matchups en cEDH suelen ser <b>casi planos</b>: un z cerca de 0 significa que no se distingue de jugar sin ese rival (solo se colorea con |z| ≥ 2). Es histórico, no una predicción: las mesas de un mismo torneo no son independientes y cambiar de rival cambia también a quién más te sientas. ${F.dec ? 'Solo mesas con ganador y rivales conocidos.' : 'Los empates cuentan como mesa no ganada.'}</div>
+        <div class="note">Los matchups en cEDH suelen ser <b>casi planos</b>: «ruido» significa que no se distingue de jugar sin ese rival (solo se colorea lo que «se nota»). Es histórico, no una predicción: las mesas de un mismo torneo no son independientes y cambiar de rival cambia también a quién más te sientas. ${F.dec ? 'Solo mesas con ganador y rivales conocidos.' : 'Los empates cuentan como mesa no ganada.'}</div>
       </div>
       ${r.shared.length ? `<div class="panel"><h2>Cartas que verás casi seguro</h2>
         <div class="muted" style="margin-bottom:6px">Las llevan al menos el 60 % de los mazos de dos o más de tus rivales y no las juega todo el meta.</div>

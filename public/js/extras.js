@@ -1,5 +1,5 @@
 import { openCommander } from './commander.js';
-import { $, F, api, cmdLabel, cn, copyText, esc, pct, pp, short, sig, track, ui } from './core.js';
+import { $, F, api, cmdLabel, cn, copyText, esc, pct, pp, short, sig, sureness, track, ui } from './core.js';
 import { goTab, writeHash } from './nav.js';
 
 export async function loadMini(name) {
@@ -37,7 +37,7 @@ export async function loadMini(name) {
         <path d="${band}" fill="var(--accent)" fill-opacity=".18"/><path d="${metaLine}" fill="none" stroke="var(--ink)" stroke-opacity=".55" stroke-dasharray="4 3"/>
         <path d="${pts.map((q, i) => (i ? 'L' : 'M') + q[0].toFixed(1) + ' ' + q[1].toFixed(1)).join(' ')}" fill="none" stroke="var(--accent)" stroke-width="2.2"/>
         ${S.map((b, i) => b.winRate == null ? '' : `<circle cx="${X(i)}" cy="${Yw(b.winRate)}" r="3.2" fill="var(--accent)"><title>Hasta ${lab(b)}: winrate ${pct(b.winRate)} (${b.decks} mazos, ${b.games} partidas)</title></circle>`).join('')}</svg>`;
-      wrSum = `Último periodo: <b>${pct(last.winRate)}</b> <span class="muted">(IC 95 %: ${pct(last.ci[0], 0)}–${pct(last.ci[1], 0)}; media del meta ${last.meta == null ? '—' : pct(last.meta, 0)})</span>`;
+      wrSum = `Último periodo: <b>${pct(last.winRate)}</b> <span class="muted">(probablemente entre ${pct(last.ci[0], 0)} y ${pct(last.ci[1], 0)}; media del meta ${last.meta == null ? '—' : pct(last.meta, 0)})</span>`;
     }
     // Top cut: % de sus mazos con puesto que pasan el corte, frente a lo que daría el azar
     const ct = S.filter(b => b.cutRate != null);
@@ -54,7 +54,7 @@ export async function loadMini(name) {
         <path d="${band}" fill="var(--accent)" fill-opacity=".18"/><path d="${exp}" fill="none" stroke="var(--ink)" stroke-opacity=".55" stroke-dasharray="4 3"/>
         <path d="${pts.map((q, i) => (i ? 'L' : 'M') + q[0].toFixed(1) + ' ' + q[1].toFixed(1)).join(' ')}" fill="none" stroke="var(--accent)" stroke-width="2.2"/>
         ${S.map((b, i) => b.cutRate == null ? '' : `<circle cx="${X(i)}" cy="${Yc(b.cutRate)}" r="3.2" fill="var(--accent)"><title>Hasta ${lab(b)}: ${pct(b.cutRate)} pasó el top cut (${Math.round(b.cutRate * b.ranked)} de ${b.ranked} mazos con puesto; el azar daría ${pct(b.cutExpected)})</title></circle>`).join('')}</svg>`;
-      cutSum = `Último periodo: <b>${pct(last.cutRate)}</b> <span class="muted">(IC 95 %: ${pct(last.cutCi[0], 0)}–${pct(last.cutCi[1], 0)}; el azar daría ${last.cutExpected == null ? '—' : pct(last.cutExpected, 0)})</span>`;
+      cutSum = `Último periodo: <b>${pct(last.cutRate)}</b> <span class="muted">(probablemente entre ${pct(last.cutCi[0], 0)} y ${pct(last.cutCi[1], 0)}; el azar daría ${last.cutExpected == null ? '—' : pct(last.cutExpected, 0)})</span>`;
     }
     box.innerHTML = `<div class="mini-head"><h2 style="margin:0">Últimos 6 meses <span class="muted" style="font-weight:400;font-size:13px">· no depende del periodo elegido</span></h2><button type="button" class="ghost" id="mini-more">Ver el detalle en Resultados</button></div>
       <div class="mini-grid">
@@ -63,7 +63,7 @@ export async function loadMini(name) {
             <path d="${pArea}" fill="var(--accent)" fill-opacity=".16"/><path d="${pLine}" fill="none" stroke="var(--accent)" stroke-width="2.2"/>
             ${S.map((b, i) => `<circle cx="${X(i)}" cy="${Ys(b.metaShare)}" r="3.2" fill="var(--accent)"><title>Hasta ${lab(b)}: ${pct(b.metaShare)} del meta (${b.decks} mazos)</title></circle>`).join('')}</svg>
           <div>${pct(shares[0])} → <b>${pct(shares[n - 1])}</b> <b class="${Math.abs(dS) < 0.002 ? 'muted' : dS > 0 ? 'pos-t' : 'neg-t'}">${pp(dS)}</b></div></div>
-        <div><div class="mini-t">Winrate <span class="muted">(línea discontinua = media del meta; zona = IC 95 %)</span></div>${wrChart}<div>${wrSum}</div></div>
+        <div><div class="mini-t">Winrate <span class="muted">(línea discontinua = media del meta; zona = rango probable)</span></div>${wrChart}<div>${wrSum}</div></div>
         <div><div class="mini-t">Pasar el top cut <span class="muted">(% de sus mazos; discontinua = lo que daría el azar)</span></div>${cutChart}<div>${cutSum}</div></div>
       </div>
       <div class="note" style="margin-top:8px"><b>Siempre usa los últimos 6 meses</b>, elijas el periodo que elijas arriba.${F.min || F.max ? ' Sí respeta el filtro de jugadores por torneo.' : ''} Cada punto es un periodo de ${t.bucketDays} días, etiquetado con su fecha final. El primero y el último pueden tener pocos mazos y moverse mucho: no leas un cambio pequeño como tendencia.</div>`;
@@ -113,7 +113,7 @@ export async function loadCardEvo(name, card) {
     box.innerHTML = `<div class="panel" style="margin-top:12px">
       <div class="mini-head"><h2 style="margin:0">${cn(card)} <span class="muted" style="font-weight:400;font-size:13px">· evolución en ${esc(cmdLabel(name))}, últimos 6 meses</span></h2><button type="button" class="ghost" id="ce-close">Cerrar</button></div>
       <div class="mini-grid">
-        <div><div class="mini-t">Winrate <span class="muted">(línea = con la carta, zona = IC 95 %; discontinua = sin ella)</span></div>${wrSvg}
+        <div><div class="mini-t">Winrate <span class="muted">(línea = con la carta, zona = rango probable; discontinua = sin ella)</span></div>${wrSvg}
           <div>${tot.winRateWith == null ? '' : `Con ella: <b>${pct(tot.winRateWith)}</b> <span class="muted">(${pct(tot.ciWith[0], 0)}–${pct(tot.ciWith[1], 0)}, ${tot.withDecks} mazos)</span>`}</div>
           <div>${tot.winRateWithout == null ? '' : `Sin ella: <b>${pct(tot.winRateWithout)}</b> <span class="muted">(${pct(tot.ciWithout[0], 0)}–${pct(tot.ciWithout[1], 0)}, ${tot.withoutDecks} mazos)</span>`}</div></div>
         <div><div class="mini-t">Mazos que la llevan <span class="muted">(% de los mazos del comandante)</span></div>
@@ -158,7 +158,7 @@ export async function loadTrend(name) {
         ${band ? `<path d="${band}" fill="var(--accent)" fill-opacity=".18"/>` : ''}
         <path d="${line}" fill="none" stroke="var(--accent)" stroke-width="2.5"/>
         ${S.map((b, i) => b.winRate == null ? '' : `<circle cx="${X(i)}" cy="${Y(b.winRate)}" r="4" fill="var(--accent)"><title>Hasta ${lab(b)}: winrate ${pct(b.winRate)} (${b.decks} mazos, ${b.games} partidas)</title></circle>`).join('')}
-        <text x="${W - R}" y="10" text-anchor="end">Winrate (línea discontinua = media del meta en cada periodo; zona = IC 95 %)</text>
+        <text x="${W - R}" y="10" text-anchor="end">Winrate (línea discontinua = media del meta en cada periodo; zona = rango probable)</text>
         ${S.map((b, i) => `<rect x="${X(i) - 12}" y="${284 - bar(b.metaShare)}" width="24" height="${bar(b.metaShare)}" rx="3" fill="var(--accent)" fill-opacity=".5"><title>Presencia en el meta: ${pct(b.metaShare)} (${b.decks} mazos)</title></rect>
           <text x="${X(i)}" y="${280 - bar(b.metaShare)}" text-anchor="middle">${pct(b.metaShare, 1)}</text>
           <text x="${X(i)}" y="304" text-anchor="middle">${lab(b)}</text>`).join('')}
@@ -198,7 +198,7 @@ export async function loadVariants(name, k) {
         <h3>Variante ${i + 1}: ${esc(short(x.signature.slice(0, 2).map(c => c.card).join(' + ') || 'sin rasgos claros', 44))}</h3>
         <div class="muted">${x.decks} mazos (${pct(x.share, 0)} del total) · empates ${pct(x.drawRate)}</div>
         <div class="wr" style="margin-top:8px"><b>${pct(x.winRate)}</b>${track(x.winRate - v.baseline, .10, !sig(x.ci, v.baseline))}</div>
-        <div class="muted" style="font-size:12px">IC 95 %: ${pct(x.ci[0])}–${pct(x.ci[1])} · ${pp(x.winRate - v.winRate)} frente a la media del comandante</div>
+        <div class="muted" style="font-size:12px">probablemente entre ${pct(x.ci[0])} y ${pct(x.ci[1])} · ${pp(x.winRate - v.winRate)} frente a la media del comandante</div>
         ${coreHtml(x.detail)}
         <div class="chips">${x.signature.map(c => `<span class="chip" data-card="${esc(c.card)}" title="Juegan la carta ${pct(c.inVariant, 0)} de esta variante frente a ${pct(c.inRest, 0)} del resto">${esc(short(c.card, 26))} <small>${pct(c.inVariant, 0)} vs ${pct(c.inRest, 0)}</small></span>`).join('')}</div>
       </div>`).join('')}</div>
@@ -270,7 +270,7 @@ export async function openCompare(a, b) {
     const rows = (l, sign) => l.filter(c => c.q < 0.25).slice(0, 6)
       .map(c => '<tr><td>' + cn(c.card) + '</td><td class="n">' + pct(c.inclusion, 0) + '</td><td class="n ' + sign + '">' + pp(c.adj) + '</td></tr>').join('') || '<tr><td class="muted">Sin datos fiables</td></tr>';
     return '<div class="panel"><h2>' + cn(r.commander, cmdLabel(r.commander)) + ': lo que más ayuda y lastra</h2>' +
-      '<table><thead><tr><th>Carta</th><th class="n">En mazos</th><th class="n">Ajustada</th></tr></thead><tbody>' + rows(r.best, 'pos-t') + rows(r.worst, 'neg-t') + '</tbody></table></div>';
+      '<table><thead><tr><th>Carta</th><th class="n">En mazos</th><th class="n" title="Cuánto sube o baja el winrate con esta carta">Efecto</th></tr></thead><tbody>' + rows(r.best, 'pos-t') + rows(r.worst, 'neg-t') + '</tbody></table></div>';
   };
 
   $('#app').innerHTML = '<button class="back" id="back">← Volver a ' + esc(short(a, 40)) + '</button>' +
@@ -300,11 +300,11 @@ export async function loadMatchups(name) {
     const maxMu = Math.max(0.02, ...r.rows.map(x => Math.abs(x.lift)));
     box.innerHTML = `
       <div class="muted" style="margin-bottom:8px">Haz clic en un rival para ver qué cartas rinden mejor contra él.</div>
-      <table><thead><tr><th>Rival en la mesa</th><th class="n">Mesas</th><th class="n">Winrate con él</th><th class="n">Sin él</th><th class="n">Diferencia</th><th style="width:110px"></th><th class="n" title="z: cuántas veces mayor es la diferencia que lo que cabría por azar. Cerca de 0 = no se distingue del azar; por encima de 2 o por debajo de −2 es llamativo (solo entonces se colorea). Positivo = mejor con ese rival; negativo = peor.">z</th></tr></thead>
+      <table><thead><tr><th>Rival en la mesa</th><th class="n">Mesas</th><th class="n">Winrate con él</th><th class="n" title="Frente a su winrate en mesas sin ese rival">Diferencia</th><th style="width:110px"></th><th class="n" title="¿La diferencia es real o puede ser casualidad? «Se nota» = es llamativa; «ruido» = no se distingue del azar.">¿Fiable?</th></tr></thead>
       <tbody>${r.rows.map(x => `
         <tr class="click" data-o="${esc(x.opponent)}"><td>${cn(x.opponent)}</td><td class="n">${x.pods}</td>
-        <td class="n">${pct(x.winRate)}</td><td class="n muted">${pct(x.winRateWithout)}</td>
-        <td class="n ${x.lift >= 0 ? 'pos-t' : 'neg-t'}">${pp(x.lift)}</td><td>${track(x.lift, maxMu)}</td><td class="n muted">${x.z.toFixed(1)}</td></tr>`).join('')}</tbody></table>
+        <td class="n" title="Sin él en la mesa: ${pct(x.winRateWithout)}">${pct(x.winRate)}</td>
+        <td class="n ${x.lift >= 0 ? 'pos-t' : 'neg-t'}">${pp(x.lift)}</td><td>${track(x.lift, maxMu)}</td><td class="n">${sureness(x.z)}</td></tr>`).join('')}</tbody></table>
       <div class="note">Cada fila compara el winrate de este comandante en mesas donde está ese rival con las mesas donde no está. Hay un sesgo inevitable: también cambia <b>quién más</b> se sienta en la mesa, así que una diferencia pequeña puede deberse a eso y no al rival. Las mesas de un mismo torneo no son independientes: tomar z como orientativo.</div>`;
     box.querySelector('tbody').onclick = e => { const tr = e.target.closest('tr'); if (tr) loadCardsVs(name, tr.dataset.o); };
   } catch (e) { box.innerHTML = `<span class="muted">${esc(e.message)}</span>`; }
@@ -315,7 +315,7 @@ async function loadCardsVs(name, opp) {
   box.innerHTML = '<div class="panel muted">Calculando…</div>';
   try {
     const r = await api(`/api/cards-vs?name=${encodeURIComponent(name)}&vs=${encodeURIComponent(opp)}`);
-    const head = '<thead><tr><th>Carta</th><th class="n">Winrate con ella</th><th class="n">Dif. contra este rival</th><th class="n">Dif. general</th><th class="n">Exceso</th><th style="width:80px"></th><th class="n" title="z: cuántas veces mayor es la diferencia que lo que cabría por azar. Cerca de 0 = no se distingue del azar; por encima de 2 o por debajo de −2 es llamativo (solo entonces se colorea). Positivo = mejor con ese rival; negativo = peor.">z</th></tr></thead>';
+    const head = '<thead><tr><th>Carta</th><th class="n">Winrate con ella</th><th class="n">Frente a este rival</th><th class="n">En general</th><th class="n" title="Lo que cambia contra este rival respecto a su efecto habitual">Diferencia extra</th><th style="width:80px"></th><th class="n" title="¿La diferencia es real o puede ser casualidad? «Se nota» = es llamativa; «ruido» = no se distingue del azar.">¿Fiable?</th></tr></thead>';
     const empty = '<tr><td class="muted">Sin datos suficientes</td></tr>';
     const maxEx = Math.max(0.02, ...[...r.best, ...r.worst].map(c => Math.abs(c.excess || 0)));
     const row = c => `<tr><td>${cn(c.card)}</td><td class="n">${pct(c.winRateWith)}</td>
@@ -323,7 +323,7 @@ async function loadCardsVs(name, opp) {
       <td class="n muted">${c.generalLift == null ? '—' : pp(c.generalLift)}</td>
       <td class="n ${c.excess == null ? 'muted' : c.excess >= 0 ? 'pos-t' : 'neg-t'}">${c.excess == null ? '—' : pp(c.excess)}</td>
       <td>${c.excess == null ? '' : track(c.excess, maxEx)}</td>
-      <td class="n muted">${c.z.toFixed(1)}</td></tr>`;
+      <td class="n">${sureness(c.z)}</td></tr>`;
     box.innerHTML = `<div class="panel">
       <h2>${esc(short(name, 40))} contra ${esc(short(opp, 40))}</h2>
       <div class="muted" style="margin-bottom:12px">${r.pods} mesas con ese rival · winrate ${r.winRate == null ? '—' : pct(r.winRate)}</div>
@@ -331,7 +331,7 @@ async function loadCardsVs(name, opp) {
         <div><h2>Mejor rendimiento</h2><table>${head}<tbody>${r.best.slice(0, 20).map(row).join('') || empty}</tbody></table></div>
         <div><h2>Peor rendimiento</h2><table>${head}<tbody>${r.worst.slice(0, 20).map(row).join('') || empty}</tbody></table></div>
       </div>
-      <div class="note"><b>Dif. contra este rival</b>: winrate de las mesas con la carta menos las mesas sin ella, solo en mesas donde está el rival.
+      <div class="note"><b>Frente a este rival</b>: winrate de las mesas con la carta menos las mesas sin ella, solo en mesas donde está el rival.
       <b>Dif. general</b>: lo mismo en todas las mesas. <b>Exceso</b> = la primera menos la segunda: separa las cartas buenas contra este rival de las que son buenas siempre.
       Se piden al menos 15 mesas con y sin la carta; con filtros de tamaño estrechos habrá pocas cartas. Es correlación, no causalidad.</div></div>`;
     box.scrollIntoView({ behavior: 'smooth', block: 'start' });

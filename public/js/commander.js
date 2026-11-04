@@ -21,11 +21,15 @@ export async function openCommander(name, minWith = 5) {
   const liftRows = list => list.slice(0, 25).map(c => `
     <tr><td>${cn(c.card)}</td>
       <td class="n">${pct(c.inclusion, 0)}</td>
-      <td class="n muted">${pp(c.lift)}</td>
       <td class="n ${c.adj >= 0 ? 'pos-t' : 'neg-t'}">${pp(c.adj)}</td>
       <td style="width:90px"><div class="bar"><i class="${c.adj >= 0 ? 'pos' : 'neg'}" style="width:${Math.abs(c.adj) / maxLift * 50}%"></i></div></td>
       <td>${rel(c.q)}</td></tr>`).join('');
-  const head = '<thead><tr><th>Carta</th><th class="n">En mazos</th><th class="n">Dif. bruta</th><th class="n" title="Diferencia encogida hacia 0 según el tamaño de la muestra">Ajustada</th><th></th><th>Fiabilidad</th></tr></thead>';
+  const head = '<thead><tr><th>Carta</th><th class="n">En mazos</th><th class="n" title="Cuánto sube o baja el winrate de los mazos que la llevan (corregido: se acerca a 0 cuando hay pocos mazos)">Efecto</th><th></th><th title="¿Puede ser casualidad? Se miran cientos de cartas y alguna sale buena por azar">¿Fiable?</th></tr></thead>';
+
+  // Una frase con la conclusión: cómo rinde y cuánto se juega
+  const share = (ui.commanders.find(c => c.commander === r.commander) || {}).metaShare;
+  const how = lo > r.baseline ? '<b class="pos-t">Rinde por encima de la media</b>' : hi < r.baseline ? '<b class="neg-t">Rinde por debajo de la media</b>' : '<b>Rinde como la media</b> (con estos datos no se distingue)';
+  const verdict = how + ': gana el ' + pct(r.winRate) + ' de sus partidas frente al ' + pct(r.baseline) + ' del meta' + (share ? ' y aparece en el ' + pct(share) + ' de los mazos' : '') + '.';
 
   const active = pickTab('cmd');
   $('#app').innerHTML = `
@@ -37,9 +41,10 @@ export async function openCommander(name, minWith = 5) {
         <button class="ghost" id="share" title="Copia la dirección con el periodo, los filtros y este comandante">Copiar enlace</button>
       </div>
     </div>
+    <div class="verdict">${verdict}</div>
     <div class="tiles" style="margin-top:12px">
       <div class="tile"><div class="v">${r.decks}</div><div class="l">mazos en ${r.tournaments} torneos</div></div>
-      <div class="tile"><div class="v">${pct(r.winRate)}</div><div class="l">winrate (IC 95 %: ${pct(lo)}–${pct(hi)})</div></div>
+      <div class="tile"><div class="v">${pct(r.winRate)}</div><div class="l">winrate (probablemente entre ${pct(lo)} y ${pct(hi)})</div></div>
       <div class="tile"><div class="v ${tone(sig(r.ci, r.baseline))}">${pp(r.winRate - r.baseline)}</div><div class="l">frente a la media del meta (${pct(r.baseline)})</div></div>
       <div class="tile"><div class="v">${r.games}</div><div class="l">${F.dec ? 'partidas con ganador' : 'partidas jugadas'}</div></div>
       <div class="tile"><div class="v">${pct(r.drawRate)}</div><div class="l">de las partidas acaban en empate</div></div>
@@ -54,12 +59,12 @@ export async function openCommander(name, minWith = 5) {
         <span class="lb t2" style="left:${gx(r.baseline)}%">media del meta ${pct(r.baseline)}</span>
         <span class="lb t" style="left:${gx(r.winRate)}%;color:var(--accent);font-weight:600">${pct(r.winRate)}</span>
         ${gx(hi) - gx(lo) < 14
-          ? `<span class="lb b" style="left:${(Number(gx(lo)) + Number(gx(hi))) / 2}%">IC 95 %: ${pct(lo)}–${pct(hi)}</span>`
+          ? `<span class="lb b" style="left:${(Number(gx(lo)) + Number(gx(hi))) / 2}%">probablemente entre ${pct(lo)} y ${pct(hi)}</span>`
           : `<span class="lb b" style="left:${gx(lo)}%">${pct(lo)}</span><span class="lb b" style="left:${gx(hi)}%">${pct(hi)}</span>`}
       </div>
-      <div class="note" style="margin:0">${lo > r.baseline ? '<b class="pos-t">Por encima de la media</b>: el intervalo de confianza (zona sombreada) queda entero a la derecha de la media del meta.'
-        : hi < r.baseline ? '<b class="neg-t">Por debajo de la media</b>: el intervalo queda entero a la izquierda de la media del meta.'
-        : '<b>No se distingue de la media</b>: el intervalo (zona sombreada) incluye la media del meta; hacen falta más partidas para decidir.'}
+      <div class="note" style="margin:0">${lo > r.baseline ? '<b class="pos-t">Por encima de la media</b>: hay margen suficiente (zona sombreada) para decir que gana más que la media del meta.'
+        : hi < r.baseline ? '<b class="neg-t">Por debajo de la media</b>: hay margen suficiente para decir que gana menos que la media del meta.'
+        : '<b>No se distingue de la media</b>: el rango probable (zona sombreada) incluye la media del meta; hacen falta más partidas para decidir.'}
         La línea tenue marca el 25 % del azar puro. ${drawNote()}</div>
     </div>
     <div class="panel" id="mini6"><div class="muted">Cargando la evolución…</div></div>
@@ -85,8 +90,8 @@ export async function openCommander(name, minWith = 5) {
           <div><h2>Menos winrate</h2><table>${head}<tbody>${liftRows(r.worst) || '<tr><td class="muted">Sin datos suficientes</td></tr>'}</tbody></table></div>
         </div>
         <div class="note">
-          <b>Cómo leerlo.</b> «Dif. bruta» compara el winrate de los mazos que juegan la carta con los que no, para este comandante.
-          <b>Ajustada</b> es esa diferencia «encogida» hacia 0 cuanto menos mazos hay (las tablas se ordenan por ella). <b>Fiabilidad</b> corrige por comparar cientos de cartas a la vez.
+          <b>Cómo leerlo.</b> «Efecto» compara el winrate de los mazos que juegan la carta con los que no, para este comandante (se acerca a 0 cuantos menos mazos hay; las tablas se ordenan por él).
+          «¿Fiable?» avisa de si puede ser casualidad, porque al mirar cientos de cartas alguna sale buena por azar.
           Es <b>correlación, no causalidad</b>: una carta puede aparecer más en los mazos de jugadores mejores o en mazos con otro plan de juego, y con cambios reales de lista de los mismos jugadores no se confirmó que añadirla mejore el resultado.
         </div>
       </details>`)}
@@ -178,7 +183,7 @@ export async function openCommander(name, minWith = 5) {
       <td><span class="tag t-${tierOf(c)[0]}">${tierOf(c)[1].replace(/s$/, '')}</span></td>
       <td class="n muted">${c.decks}</td>
       <td class="n"><div class="share">${pct(c.inclusion, 0)}<span style="width:${Math.round(c.inclusion * 60)}px"></span></div></td>
-      <td class="n ${wTone}" ${few ? '' : `title="IC 95 %: ${pct(c.ci[0], 0)}–${pct(c.ci[1], 0)} · ${c.games} partidas"`}>${few ? '<span title="Muy pocos mazos para dar un winrate">—</span>' : pct(c.winRateWith)}</td>
+      <td class="n ${wTone}" ${few ? '' : `title="Probablemente entre ${pct(c.ci[0], 0)} y ${pct(c.ci[1], 0)} · ${c.games} partidas"`}>${few ? '<span title="Muy pocos mazos para dar un winrate">—</span>' : pct(c.winRateWith)}</td>
       <td class="n ${dTone}">${c.lift == null ? '—' : pp(c.lift)}</td>
       <td><button type="button" class="ghost" data-evo="${esc(c.card)}" title="Cómo ha evolucionado el winrate con esta carta en los últimos 6 meses">Evolución</button></td></tr>`;
     }).join('') || '<tr><td colspan="7" class="muted">Ninguna carta coincide.</td></tr>';

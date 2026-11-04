@@ -73,12 +73,12 @@ function playerHtml(r) {
     <h2>${esc(r.name)}</h2>
     <div class="muted">${r.aliases.length > 1 ? `También aparece como: ${r.aliases.filter(a => a !== r.name).map(esc).join(', ')} · ` : ''}${r.tournaments} ${r.tournaments === 1 ? 'torneo' : 'torneos'} · ${r.decks} ${r.decks === 1 ? 'mazo' : 'mazos'} · de ${days(r.firstDate)} a ${days(r.lastDate)}</div>
     <div class="tiles" style="margin-top:12px">
-      <div class="tile"><div class="v ${rel}">${r.winRate == null ? '—' : pct(r.winRate)}</div><div class="l">winrate (IC 95 %: ${pct(r.ci[0])}–${pct(r.ci[1])}) · media del meta ${pct(base)}</div></div>
+      <div class="tile"><div class="v ${rel}">${r.winRate == null ? '—' : pct(r.winRate)}</div><div class="l">winrate (probablemente entre ${pct(r.ci[0])} y ${pct(r.ci[1])}) · media del meta ${pct(base)}</div></div>
       <div class="tile"><div class="v">${r.games}</div><div class="l">partidas${F.dec ? ' con ganador' : ''} · ${r.wins} victorias</div></div>
       ${lk ? `<div class="tile"><div class="v">${lk.cut}</div><div class="l">veces en el top cut de ${lk.ranked} torneos con puesto ${vs('', lk.expectedCut).replace('<b></b> ', '')}</div></div>
       <div class="tile"><div class="v">${lk.wins}</div><div class="l">torneos ganados ${vs('', lk.expectedWins).replace('<b></b> ', '')}</div></div>` : ''}
     </div>
-    ${few ? `<div class="note">Hay pocas partidas (${r.games}): el winrate de este jugador puede ser pura casualidad; mira el intervalo de confianza.</div>` : ''}
+    ${few ? `<div class="note">Hay pocas partidas (${r.games}): el winrate de este jugador puede ser pura casualidad; mira el rango probable.</div>` : ''}
     ${lk ? '' : '<div class="note">Aún no hay puestos guardados para este jugador (aparecerán al renovar el seed).</div>'}
   </div>
   ${playerExtras(r)}
@@ -150,7 +150,7 @@ export async function bindRegulars() {
       ${r.rows.length ? `<table><thead><tr><th>Jugador</th><th class="n">Torneos</th><th class="n" title="Veces en el top cut / las que cabría esperar por azar">Top cut (azar)</th><th class="n" title="Torneos ganados / los esperables por azar">Títulos (azar)</th><th class="n">Winrate</th><th title="q: proporción esperada de falsos positivos tras corregir por mirar a muchos jugadores a la vez">Señal</th></tr></thead><tbody>
       ${r.rows.map(x => `<tr><td><a href="#" class="plink" data-player="${esc(x.name)}">${esc(x.name)}</a></td><td class="n">${x.tournaments}</td>
         <td class="n"><b>${x.cut}</b> <span class="muted">(${x.expectedCut.toFixed(1).replace('.', ',')})</span></td><td class="n"><b>${x.titles}</b> <span class="muted">(${x.expectedTitles.toFixed(1).replace('.', ',')})</span></td>
-        <td class="n" title="IC 95 %: ${pct(x.ci[0], 0)}–${pct(x.ci[1], 0)}">${x.winRate == null ? '—' : pct(x.winRate, 0)} <span class="muted">· ${x.games}</span></td>
+        <td class="n" title="Probablemente entre ${pct(x.ci[0], 0)} y ${pct(x.ci[1], 0)}">${x.winRate == null ? '—' : pct(x.winRate, 0)} <span class="muted">· ${x.games}</span></td>
         <td>${x.better ? '<span class="rel hi" title="q &lt; 5 %: es poco probable que sea casualidad">● por encima del azar</span>' : '<span class="muted" title="Compatible con la suerte">compatible con el azar</span>'}</td></tr>`).join('')}</tbody></table>
       <div class="note">${r.total > r.rows.length ? `Se muestran ${r.rows.length} de ${r.total}. ` : ''}</div>` : '<span class="muted">Ningún jugador coincide con la búsqueda.</span>'}`;
     out.querySelectorAll('.plink').forEach(a => { a.onclick = e => { e.preventDefault(); openPlayer(a.dataset.player); }; });
@@ -170,7 +170,7 @@ export async function bindTeams() {
     if (!r.total) { out.innerHTML = `<span class="muted">No hay ninguna etiqueta con al menos ${r.minPlayers} jugadores y ${r.minDecks} mazos en este periodo y con estos filtros.</span>`; return; }
     out.innerHTML = `<table><thead><tr><th>Etiqueta</th><th class="n">Jugadores</th><th class="n">Mazos</th><th class="n">Torneos</th><th class="n">Winrate</th><th class="n" title="Veces que un jugador del equipo pasó el top cut / las esperables por azar">Top cut (azar)</th><th class="n" title="Torneos ganados por alguien del equipo / los esperables por azar">Títulos (azar)</th><th>Jugadores con más mazos</th></tr></thead><tbody>
       ${r.rows.map(x => `<tr><td><b>${esc(x.tag)}</b></td><td class="n">${x.players}</td><td class="n">${x.decks}</td><td class="n muted">${x.tournaments}</td>
-        <td class="n" title="IC 95 %: ${pct(x.ci[0], 0)}–${pct(x.ci[1], 0)}">${x.winRate == null ? '—' : pct(x.winRate, 0)} <span class="muted">· ${x.games}</span></td>
+        <td class="n" title="Probablemente entre ${pct(x.ci[0], 0)} y ${pct(x.ci[1], 0)}">${x.winRate == null ? '—' : pct(x.winRate, 0)} <span class="muted">· ${x.games}</span></td>
         <td class="n">${x.ranked ? `<b>${x.cut}</b> <span class="muted">(${x.expectedCut.toFixed(1).replace('.', ',')})</span>` : '<span class="muted">—</span>'}</td>
         <td class="n">${x.ranked ? `<b>${x.titles}</b> <span class="muted">(${x.expectedTitles.toFixed(1).replace('.', ',')})</span>` : '<span class="muted">—</span>'}</td>
         <td>${x.top.map(p => `<a href="#" class="plink" data-player="${esc(p.name)}">${esc(p.name.replace(/\s*\[[^\]]*\]/, ''))}</a> <span class="muted">${p.decks}</span>`).join(', ')}</td></tr>`).join('')}</tbody></table>
