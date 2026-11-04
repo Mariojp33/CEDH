@@ -45,7 +45,7 @@ MOCK=1 node server.js          # http://localhost:3000
 export TOPDECK_API_KEY=tu_clave   # gratis en https://topdeck.gg/developers
 node server.js
 
-# Tests (lógica, servidor y, si hay Chrome instalado, también la interfaz)
+# Tests (lógica, servidor, módulos del front y, si hay Chrome instalado, también la interfaz; Node 20.10+)
 npm test
 ```
 
@@ -68,7 +68,7 @@ La primera carga descarga `DAYS` días (por defecto 180) en ventanas de 7 días,
 
 `.github/workflows/update-seed.yml` renueva los datos cada 2 días (cron editable; a diario: `17 4 * * *`): parte del último seed publicado, descarga solo los días que faltan con `npm run seed:update`, comprueba que el resultado se lee y que no ha perdido datos (se aborta si pierde más del 10 %) y lo **publica como archivo de la release `seed`**, sobrescribiendo el anterior. No se hace ningún commit, así que el historial de git no crece. También se lanza a mano desde la pestaña Actions (Run workflow).
 
-El servidor, al arrancar sin caché en disco, descarga ese seed (`SEED_URL`, por defecto `https://github.com/Mariojp33/CEDH/releases/download/seed/records.json`; vacío = desactivado) y, si no puede (no existe aún, error de red o archivo roto), usa la copia que hay en el repositorio (`seed/records.json`, renovable a mano con `npm run seed`). Como los datos viven fuera del código, **actualizarlos no obliga a redesplegar**.
+El servidor, al arrancar sin caché en disco, descarga ese seed (`SEED_URL`, por defecto `https://github.com/Mariojp33/CEDH/releases/download/seed/records.json`; vacío = desactivado) y, si no puede (no existe aún, error de red o archivo roto), usa una copia local opcional (`seed/records.json`, que **no va en git**: la carpeta `seed/` está en `.gitignore`; se genera a mano con `npm run seed` a partir de la caché, o con `SEED_FILE` apuntas a otra ruta). Si tampoco hay copia local, el servidor arranca vacío y se rellena con la clave de TopDeck. Como los datos viven fuera del código, **actualizarlos no obliga a redesplegar**.
 
 Configuración:
 - En GitHub (Settings → Secrets and variables → Actions → **Secrets**): `TOPDECK_API_KEY`. Y en Settings → Actions → General, permisos de flujo «Read and write».
@@ -98,7 +98,7 @@ La API exige un crédito visible con enlace a TopDeck.gg en cualquier proyecto q
 
 ## Endpoints
 
-Todos aceptan además `dec=1` (empates fuera del cálculo). Las respuestas se comprimen con gzip y los cálculos pesados se guardan en memoria hasta la siguiente actualización de datos. `/api/status`, `/api/commanders`, `/api/commander?name=`, `/api/matchups?name=`, `/api/matrix?top=`, `/api/tournaments?q=`, `/api/tournament?tid=`, `/api/decks?commander=&card=&player=&scope=`, `/api/deck?tid=&rank=`, `/api/commander-decks?name=&q=&scope=&sort=`, `/api/players?q=`, `/api/player?key=`, `/api/regulars?min=&sort=&q=`, `/api/teams?q=`, `/api/card-trend?name=&card=`, `/api/cards-vs?name=&vs=`, `/api/threats?name=` (cartas a tener en cuenta), `/api/combos?name=` (combos y amenazas), `/api/table?me=&r1=&r2=&r3=`, `/api/variants?…&detail=1` (núcleo y huecos), `/api/card?name=`, `/api/cards?q=`, `/api/card-alternatives?name=&commander=`, `/api/novelties` y `/api/meta`, `/api/trend?name=`, `/api/synergy?name=`, `/api/variants?name=&k=` y `POST /api/mylist` (`{commander, list}`). Todos aceptan `minPlayers`, `maxPlayers` y `days` (salvo `trend`, que usa todo el histórico).
+Todos aceptan además `dec=1` (empates fuera del cálculo). Las respuestas se comprimen con gzip y los cálculos pesados se guardan en memoria hasta la siguiente actualización de datos. `/api/status`, `/api/commanders`, `/api/commander?name=`, `/api/matchups?name=`, `/api/matrix?top=`, `/api/tournaments?q=`, `/api/tournament?tid=`, `/api/decks?commander=&card=&player=&scope=`, `/api/deck?tid=&rank=`, `/api/commander-decks?name=&q=&scope=&sort=`, `/api/players?q=`, `/api/player?key=`, `/api/regulars?min=&sort=&q=`, `/api/teams?q=`, `/api/card-trend?name=&card=`, `/api/cards-vs?name=&vs=`, `/api/threats?name=` (cartas a tener en cuenta), `/api/combos?name=` (combos y amenazas), `/api/table?me=&r1=&r2=&r3=`, `/api/variants?…&detail=1` (núcleo y huecos), `/api/card?name=`, `/api/cards?q=`, `/api/card-alternatives?name=&commander=`, `/api/novelties` y `/api/meta`, `/api/trend?name=`, `/api/variants?name=&k=` y `POST /api/mylist` (`{commander, list}`). Todos aceptan `minPlayers`, `maxPlayers` y `days` (salvo `trend`, que usa todo el histórico).
 
 ## Estructura
 
@@ -113,9 +113,13 @@ Todos aceptan además `dec=1` (empates fuera del cálculo). Las respuestas se co
 - `lib/combos.js` — combos y amenazas (Commander Spellbook + nuestros mazos).
 - `lib/table.js` — preparar mesa (matchups contra rivales concretos y cartas que los distinguen).
 - `lib/rating.js` — modelo de Luce (fuerza por comandante); probado, pero no se usa en la web porque no mejora al winrate directo (ver más abajo).
-- `server.js` — servidor y rutas de la API.
-- `public/index.html` (estructura), `public/app.css` (estilos) y `public/app.js` (lógica). La interfaz se organiza **por tareas**: un **buscador único** en la cabecera (comandantes y cartas), **filtros plegables** que siempre resumen lo elegido y las secciones **Mazos · Meta (Panorama, Novedades de cartas) · Torneos y listas (Torneos, Buscar listas top, Jugadores, Habituales, Equipos) · Preparar mesa · Revisar mi lista · Buscar carta · Más (Cómo leer esto, Matriz de matchups, Fiabilidad del método)**. La ficha de cada comandante tiene **Cartas · Cómo juega · Combos y amenazas · Resultados · Mi lista**. Cada pestaña y apartado carga sus datos al abrirlo y queda en la dirección (los enlaces de versiones anteriores siguen funcionando).
-- `scripts/make-seed.js` — genera `seed/records.json` (copia de la caché incluida en el repositorio, `npm run seed`).
+- `server.js` — estado, carga del seed y actualizaciones, arranque.
+- `lib/routes.js` — rutas de la API (una función por endpoint, con caché de las respuestas pesadas) y archivos estáticos.
+- `lib/http.js` — respuestas JSON con gzip, estáticos y cabeceras de seguridad.
+- `public/index.html` (estructura), `public/app.css` (estilos) y `public/app.js` (punto de entrada) y `public/js/` (la lógica, en módulos ES sin empaquetador: `core.js` con los ayudantes y el estado compartido `ui`, `nav.js` con pestañas y dirección, `list.js` y `commander.js` con las pantallas principales, y un módulo por área: `meta`, `cards`, `tournaments`, `players`, `decks`, `mylist`, `table`, `combos`, `extras`…; `test/modules.test.js` vigila que sus imports sean coherentes). La interfaz se organiza **por tareas**: un **buscador único** en la cabecera (comandantes y cartas), **filtros plegables** que siempre resumen lo elegido y las secciones **Mazos · Meta (Panorama, Novedades de cartas) · Torneos y listas (Torneos, Buscar listas top, Jugadores, Habituales, Equipos) · Preparar mesa · Revisar mi lista · Buscar carta · Más (Cómo leer esto, Matriz de matchups, Fiabilidad del método)**. La ficha de cada comandante tiene **Cartas · Cómo juega · Combos y amenazas · Resultados · Mi lista**. Cada pestaña y apartado carga sus datos al abrirlo y queda en la dirección (los enlaces de versiones anteriores siguen funcionando).
+- Capa visual del front (`public/js/`): `visual.js` (miniatura y colores de maná junto a cada comandante, con datos de Scryfall pedidos desde el navegador solo cuando entran en pantalla y recordados en `localStorage`), `mobile.js` (en móvil, las tablas anchas se muestran como tarjetas), `shell.js` (tema claro/oscuro manual, compartir y registro del service worker). En `public/`: `favicon.svg`, `manifest.webmanifest` + iconos (la web se puede instalar en el móvil), `sw.js` (con conexión pide siempre lo último; sin ella sirve lo último que se vio) y `og.png` (imagen de vista previa).
+- Compartir: un comandante se comparte como `/?c=NOMBRE`; el servidor rellena las etiquetas Open Graph (título, winrate, arte de la carta) para las vistas previas de Discord y similares, y la web convierte el enlace a su dirección habitual con `#`.
+- `scripts/make-seed.js` — genera `seed/records.json` como copia local de respaldo (carpeta ignorada por git, `npm run seed`).
 
 ## Comprobación contra la API real
 

@@ -146,3 +146,28 @@ test('todas las respuestas llevan cabeceras de seguridad (CSP sin scripts extern
     assert.doesNotMatch(csp, /script-src[^;]*unsafe/, p);
   }
 });
+
+test('la portada rellena las etiquetas de vista previa; con ?c= usa las del comandante y escapa lo que llega', async () => {
+  const def = (await get('/', { Host: 'ejemplo.test' })).body.toString();
+  assert.match(def, /og:title" content="cEDH Stats por comandante"/);
+  assert.match(def, /og:image" content="http:\/\/ejemplo\.test\/og\.png"/);
+  assert.ok(!/__(TITLE|DESC|IMAGE|URL|CARD)__/.test(def), 'no quedan marcadores sin rellenar');
+  const c = (await get('/?c=' + encodeURIComponent('Kinnan, Bonder Prodigy'))).body.toString();
+  assert.match(c, /<title>Kinnan, Bonder Prodigy · cEDH Stats<\/title>/);
+  assert.match(c, /og:image" content="https:\/\/api\.scryfall\.com\/cards\/named\?exact=Kinnan/);
+  const evil = (await get('/?c=' + encodeURIComponent('"><script>x</script>'))).body.toString();
+  assert.ok(!evil.includes('<script>x'), 'un nombre inventado no entra en la página');
+  assert.match(evil, /og:title" content="cEDH Stats por comandante"/);
+});
+
+test('manifest, iconos y service worker se sirven con su tipo y la web es instalable', async () => {
+  const m = await get('/manifest.webmanifest');
+  assert.match(m.headers['content-type'], /manifest\+json/);
+  const man = JSON.parse(m.body);
+  assert.ok(man.icons.length >= 3 && man.start_url === '/' && man.display === 'standalone');
+  for (const i of man.icons) assert.strictEqual((await get('/' + i.src)).status, 200, i.src);
+  assert.strictEqual((await get('/icon-192.png')).headers['content-type'], 'image/png');
+  const sw = await get('/sw.js');
+  assert.match(sw.headers['content-type'], /javascript/);
+  assert.strictEqual(sw.headers['cache-control'], 'no-cache');
+});
