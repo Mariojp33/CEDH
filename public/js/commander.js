@@ -1,3 +1,4 @@
+import { isFav, toggleFav } from './favs.js';
 import { shareUrl } from './shell.js';
 import { loadCombos, loadThreatCards } from './combos.js';
 import { $, F, api, cn, copyText, drawNote, ensureCommanders, esc, pct, pp, rel, short, sig, tone, ui } from './core.js';
@@ -38,6 +39,7 @@ export async function openCommander(name, minWith = 5) {
       <h2 style="font-size:20px">${cn(r.commander)}</h2>
       <div class="ctl" style="margin:0">
         <label>Comparar con: <select id="cmp"><option value="">— elige comandante —</option></select></label>
+        <button class="ghost" id="fav" aria-pressed="${isFav(r.commander)}" title="Guarda este comandante en tus favoritos (solo en este navegador)">${isFav(r.commander) ? '★ Favorito' : '☆ Favorito'}</button>
         <button class="ghost" id="share" title="Copia la dirección con el periodo, los filtros y este comandante">Copiar enlace</button>
       </div>
     </div>
@@ -153,6 +155,7 @@ export async function openCommander(name, minWith = 5) {
   $('#back').onclick = () => { ui.view = { t: 'list', tab: 'mazos' }; renderList(); };
   bindMyList(name);
   if (ui.view.autorun) { ui.view.autorun = false; $('#ml-go').click(); }   // viene de «Revisar mi lista»: se analiza al llegar
+  $('#fav').onclick = () => { const on = toggleFav(r.commander); $('#fav').setAttribute('aria-pressed', String(on)); $('#fav').textContent = on ? '★ Favorito' : '☆ Favorito'; };
   $('#share').onclick = () => copyText(shareUrl(), $('#share'));
   ensureCommanders().then(() => {
     $('#cmp').insertAdjacentHTML('beforeend', ui.commanders.filter(c => c.commander !== name).map(c => `<option>${esc(c.commander)}</option>`).join(''));

@@ -579,3 +579,8 @@ details.sect > .panel { border-top: 0; border-top-left-radius: 0; border-top-rig
 .cbtn { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px 3px 6px; border-radius: 99px; border: 1px solid var(--line); background: var(--bg); color: var(--ink, inherit); font-size: 13px; cursor: pointer; }
 .cbtn i { width: 11px; height: 11px; border-radius: 50%; box-shadow: 0 0 0 1px rgba(0,0,0,.28) inset; }
 .cbtn[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; font-weight: 600; }
+
+/* Favoritos */
+.star { border: 0; background: none; padding: 0 4px 0 0; margin-right: 2px; font-size: 16px; line-height: 1; cursor: pointer; color: var(--muted); }
+.star.on { color: #c28b1e; }
+.star:hover { color: #c28b1e; }

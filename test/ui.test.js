@@ -63,6 +63,12 @@ async function scenario(name) {
   await until(() => document.getElementById('colornote').textContent.includes('exactamente'));
   out.colores = { filas: filas(), nota: document.getElementById('colornote').textContent };
   document.querySelector('[data-col=C]').click();
+  // Favoritos: marcar uno y filtrar
+  const antesFav = filas();
+  document.querySelector('#rows [data-fav]').click();
+  document.getElementById('onlyfav').click();
+  out.favoritos = { antes: antesFav, solo: filas(), nota: document.getElementById('nfav').textContent };
+  document.getElementById('onlyfav').click(); document.querySelector('#rows [data-fav]').click();
   // Meta con sus apartados
   document.getElementById('tab-meta').click();
   await until(() => document.querySelector('#meta .tier'));
@@ -273,6 +279,7 @@ test('interfaz: recorrido por secciones, buscador único, ficha y «Revisar mi l
   assert.match(r.cabecera.resumen, /Filtros · 3 meses · empates cuentan como no ganadas/);
   assert.deepStrictEqual(r.meta.apartados, ['Panorama', 'Novedades de cartas']);
   assert.ok(r.colores.filas > 0 && /exactamente/.test(r.colores.nota), 'el filtro por colores deja comandantes');
+  assert.ok(r.favoritos.solo === 1 && r.favoritos.antes > 1 && r.favoritos.nota === '(1)', 'favoritos: ' + JSON.stringify(r.favoritos));
   assert.ok(r.meta.niveles >= 3 && /t=meta&s=panorama/.test(r.meta.hash.replace(/&amp;/g, '&')));
   assert.ok(r.novedades.cargado && /s=novedades/.test(r.novedades.hash));
   assert.deepStrictEqual(r.torneos.apartados, ['Torneos', 'Buscar listas top', 'Jugadores']);

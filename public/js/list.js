@@ -2,6 +2,7 @@ import { bindCardSearch } from './cards.js';
 import { openCommander } from './commander.js';
 import { $, F, MIN_TABLE, cn, drawNote, esc, pct, pp, sig, tone, track, ui } from './core.js';
 import { loadMatrix, loadValidation } from './extras.js';
+import { favCount, isFav, toggleFav } from './favs.js';
 import { guideHtml } from './guide.js';
 import { loadHighlights, loadMeta, loadNovelties } from './meta.js';
 import { bindReviewList } from './mylist.js';
@@ -43,6 +44,7 @@ export function renderList() {
       <label class="sr" for="q">Filtrar la lista de comandantes</label>
       <input type="search" id="q" placeholder="Filtrar la lista de comandantes…">
       <label class="muted" style="display:inline-flex;gap:6px;align-items:center;margin-top:8px"><input type="checkbox" id="showall"> Mostrar también los de menos de ${MIN_TABLE} mazos (<span id="nfew"></span>)</label>
+      <label class="muted" style="display:inline-flex;gap:6px;align-items:center;margin:8px 0 0 16px"><input type="checkbox" id="onlyfav"> Solo mis favoritos <span id="nfav"></span></label>
       <div class="colorpick" id="colorpick" role="group" aria-label="Filtrar por colores">
         <span class="muted">Colores:</span>
         ${[['W', 'Blanco'], ['U', 'Azul'], ['B', 'Negro'], ['R', 'Rojo'], ['G', 'Verde'], ['C', 'Incoloro']].map(([k, n]) => `<button type="button" class="cbtn" data-col="${k}" aria-pressed="false" title="${n}"><i class="p${k}"></i>${n}</button>`).join('')}
@@ -93,9 +95,9 @@ export function renderList() {
   const draw = () => {
     const q = $('#q').value.toLowerCase(), all = $('#showall').checked;
     // Con texto en el filtro se buscan todos; sin él, la tabla enseña solo los de muestra razonable (salvo que se pida lo contrario)
-    $('#rows').innerHTML = ui.commanders.filter(c => c.commander.toLowerCase().includes(q) && colorOk(c) && (all || q || picked.size || c.decks >= MIN_TABLE)).map(c => `
+    $('#rows').innerHTML = ui.commanders.filter(c => c.commander.toLowerCase().includes(q) && colorOk(c) && (!$('#onlyfav').checked || isFav(c.commander)) && (all || q || picked.size || $('#onlyfav').checked || c.decks >= MIN_TABLE)).map(c => `
       <tr class="click${sig(c.ci, F.meta) > 0 ? ' hi-pos' : sig(c.ci, F.meta) < 0 ? ' hi-neg' : ''}" data-c="${esc(c.commander)}" tabindex="0" role="link" aria-label="Abrir ${esc(c.commander)}">
-        <td>${cn(c.commander)}${c.decks < MIN_TABLE ? ' <span class="few" title="Muestra pequeña: winrate poco fiable">muestra pequeña</span>' : ''}</td><td class="n">${c.decks}</td>
+        <td><button type="button" class="star${isFav(c.commander) ? ' on' : ''}" data-fav="${esc(c.commander)}" aria-label="Favorito: ${esc(c.commander)}" aria-pressed="${isFav(c.commander)}">${isFav(c.commander) ? '★' : '☆'}</button>${cn(c.commander)}${c.decks < MIN_TABLE ? ' <span class="few" title="Muestra pequeña: winrate poco fiable">muestra pequeña</span>' : ''}</td><td class="n">${c.decks}</td>
         <td><div class="share">${pct(c.metaShare)}<span style="width:${Math.min(100, c.metaShare / maxShare * 60)}px"></span></div></td>
         <td><div class="wr"><b>${pct(c.winRate)}</b>${track(c.winRate - F.meta, .10, !sig(c.ci, F.meta))}</div></td>
         <td class="n ${tone(sig(c.ci, F.meta))}">${pp(c.winRate - F.meta)}</td>
@@ -105,6 +107,9 @@ export function renderList() {
   };
   loadHighlights($('#hl'));
   $('#nfew').textContent = ui.commanders.filter(c => c.decks < MIN_TABLE).length;
+  const favNote = () => { $('#nfav').textContent = favCount() ? '(' + favCount() + ')' : ''; };
+  favNote();
+  $('#onlyfav').onchange = draw;
   $('#showall').onchange = draw;
   $('#colorpick').onclick = async e => {
     const b = e.target.closest('[data-col]'); if (!b) return;
@@ -120,9 +125,16 @@ export function renderList() {
     $('#colornote').textContent = picked.size ? 'Se muestran los comandantes con exactamente esos colores.' : '';
   };
   $('#q').oninput = draw; draw();
-  const open = e => { const tr = e.target.closest('tr'); if (tr) { ui.view.tab = undefined; openCommander(tr.dataset.c); } };
+  const open = e => { if (e.target.closest('[data-fav]')) return; const tr = e.target.closest('tr'); if (tr) { ui.view.tab = undefined; openCommander(tr.dataset.c); } };
+  $('#rows').addEventListener('click', e => {
+    const b = e.target.closest('[data-fav]'); if (!b) return;
+    const on = toggleFav(b.dataset.fav);
+    b.classList.toggle('on', on); b.textContent = on ? '★' : '☆'; b.setAttribute('aria-pressed', String(on));
+    favNote();
+    if ($('#onlyfav').checked && !on) draw();
+  });
   $('#rows').onclick = open;
-  $('#rows').onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(e); } };
+  $('#rows').onkeydown = e => { if (e.target.closest('[data-fav]')) return; if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(e); } };
   document.querySelectorAll('[data-go]').forEach(b => { b.onclick = () => goTab(b.dataset.go); });
   const matrixHtml = `<div class="panel">
       <h2>Matriz de matchups (12 comandantes más jugados)</h2>
