@@ -1,20 +1,16 @@
 'use strict';
 // Servidor sin dependencias: descarga torneos de TopDeck.gg, los cachea y sirve estadísticas por comandante.
 const http = require('node:http');
-const zlib = require('node:zlib');
 const fs = require('node:fs');
 const path = require('node:path');
 const { fetchTournaments } = require('./lib/topdeck');
-const tournaments = require('./lib/tournaments');
-const { cardTrendReport, BASICS, buildRecords, filterRecords, commanderList, classifyTournaments, neighborsReport, commanderReport, metaWinRate, decisive, decisiveSeats, validationReport, myListReport, packagesReport, trendReport, variantsReport, matchups, matrix, cardsVsOpponent } = require('./lib/stats');
+const { buildRecords } = require('./lib/stats');
 const cache = require('./lib/cache');
-const { parseText } = require('./lib/parse');
 const dataset = require('./lib/dataset');
-const { buildCardIndexAsync, suggestCards, cardReport, noveltiesReport, alternativesReport } = require('./lib/cardindex');
-const { metaReport } = require('./lib/meta');
-const { tableReport } = require('./lib/table');
+const { buildCardIndexAsync } = require('./lib/cardindex');
+const { createHandler } = require('./lib/routes');
+const { SECURITY_HEADERS, fail } = require('./lib/http');
 const combos = require('./lib/combos');
-const threats = require('./lib/threats');
 const { mockTournaments } = require('./lib/mock');
 
 const PORT = Number(process.env.PORT) || 3000;
@@ -30,7 +26,7 @@ const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const CACHE_FILE = path.join(DATA_DIR, 'records.json');
 // Copia de la caché incluida en el repositorio (npm run seed). Sirve de punto de partida cuando el disco
 // no persiste (p. ej. Render gratis): se carga al instante y solo se descargan los días que faltan.
-const SEED_FILE = path.join(__dirname, 'seed', 'records.json');
+const SEED_FILE = process.env.SEED_FILE || path.join(__dirname, 'seed', 'records.json'); // copia local opcional (carpeta ignorada por git)
 const PUBLIC = path.join(__dirname, 'public');
 // Seed publicado por la tarea programada de GitHub como archivo de una «release» (que se sobrescribe en cada
 // ejecución y no engorda el historial de git). Al arrancar sin caché en disco se descarga de ahí; si falla,
@@ -85,7 +81,7 @@ async function loadCache() {
   const sources = [
     { label: '', get: async () => JSON.parse(fs.readFileSync(CACHE_FILE, 'utf8')) },
     ...(SEED_URL ? [{ label: ' (seed descargado de GitHub)', get: () => fetchRemoteSeed(SEED_URL) }] : []),
-    { label: ' (copia del repositorio)', get: async () => JSON.parse(fs.readFileSync(SEED_FILE, 'utf8')) },
+    { label: ' (copia local)', get: async () => JSON.parse(fs.readFileSync(SEED_FILE, 'utf8')) },
   ];
   // Una caché o un seed guardado antes de que se guardara la posición final de cada mazo no la tiene: se prefiere cualquier
   // otro origen que sí la tenga (por ejemplo el seed publicado en GitHub), y solo si no hay ninguno se usa el primero válido.
@@ -177,324 +173,11 @@ async function refresh() {
   }
 }
 
-const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
-
-const wantsGzip = res => /\bgzip\b/.test(String(res.req && res.req.headers['accept-encoding'] || ''));
-
-function json(res, code, body) {
-  const raw = Buffer.from(JSON.stringify(body));
-  const headers = { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'public, max-age=60', Vary: 'Accept-Encoding' };
-  if (raw.length > 1024 && wantsGzip(res)) {
-    headers['Content-Encoding'] = 'gzip';
-    res.writeHead(code, headers);
-    return res.end(zlib.gzipSync(raw)); // las respuestas grandes (la ficha de un comandante pesa cientos de KB) bajan a una fracción
-  }
-  res.writeHead(code, headers);
-  res.end(raw);
-}
-
-// Archivos estáticos: se leen una vez (y se comprimen) mientras no cambien en disco.
-const staticCache = new Map();
-function serveStatic(res, file) {
-  const mtime = fs.statSync(file).mtimeMs;
-  let e = staticCache.get(file);
-  if (!e || e.mtime !== mtime) {
-    const raw = fs.readFileSync(file);
-    e = { mtime, raw, gz: /\.(html|js|css|svg)$/.test(file) ? zlib.gzipSync(raw) : null };
-    staticCache.set(file, e);
-  }
-  const headers = { 'Content-Type': TYPES[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-cache', Vary: 'Accept-Encoding' };
-  if (e.gz && wantsGzip(res)) { headers['Content-Encoding'] = 'gzip'; res.writeHead(200, headers); return res.end(e.gz); }
-  res.writeHead(200, headers); res.end(e.raw);
-}
-
-// Los cálculos pesados (sinergias, variantes, matchups…) se guardan hasta la siguiente actualización de datos.
-const memo = new Map();
-let memoStamp = null;
-const seatCache = { stamp: null, map: new Map() };
-const MEMO_PATHS = new Set(['/api/card-trend', '/api/regulars', '/api/teams', '/api/players', '/api/player', '/api/commander-decks', '/api/tournaments', '/api/tournament', '/api/decks', '/api/deck', '/api/threats', '/api/table', '/api/card', '/api/card-alternatives', '/api/novelties', '/api/meta', '/api/packages', '/api/variants', '/api/trend', '/api/matchups', '/api/matrix', '/api/cards-vs', '/api/validation']);
-
-// ---- Combos y amenazas (Commander Spellbook) ----
-// Se consulta a Spellbook solo cuando alguien abre los combos de un comandante; el resultado se guarda 24 h y las
-// consultas simultáneas del mismo comandante comparten una sola petición. El uso se calcula siempre sobre nuestros mazos.
-const COMBOS_API = process.env.COMBOS_API || combos.DEFAULT_API;
-const comboCache = new Map();      // comandante -> { t, data }
-const comboInflight = new Map();   // comandante -> promesa de la petición en curso
-const COMBO_TTL = 24 * 3600 * 1000;
-const comboHits = new Map();       // ip -> marcas de tiempo de sus peticiones que han ido a Spellbook
-function limitedCombos(req) {
-  const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '?').split(',')[0].trim();
-  const now = Date.now(), hits = (comboHits.get(ip) || []).filter(t => now - t < 60000);
-  hits.push(now); comboHits.set(ip, hits);
-  if (comboHits.size > 5000) comboHits.clear();
-  return hits.length > 8;
-}
-async function commanderCombos(key, req) {
-  const hit = comboCache.get(key);
-  if (hit && Date.now() - hit.t < COMBO_TTL) return { data: hit.data, t: hit.t };
-  if (comboInflight.has(key)) return { data: await comboInflight.get(key), t: Date.now() };
-  const decks = state.records.filter(r => r.key === key);
-  if (decks.length < 50) throw new combos.ComboApiError('Hacen falta al menos 50 mazos de este comandante para buscar combos', 404);
-  if (limitedCombos(req)) throw new combos.ComboApiError('Demasiadas búsquedas de combos seguidas; espera un minuto', 429);
-  const request = combos.unionRequest(decks, key.split(' / '), BASICS);
-  const p = combos.fetchCombos({ ...request, api: COMBOS_API }).then(combos.compact).finally(() => comboInflight.delete(key));
-  comboInflight.set(key, p);
-  try {
-    const data = await p;
-    if (comboCache.size >= 60) comboCache.clear();
-    comboCache.set(key, { t: Date.now(), data });
-    return { data, t: Date.now() };
-  } catch (e) {
-    if (hit) return { data: hit.data, t: hit.t, stale: true };   // si Spellbook falla, se usa la última respuesta buena
-    throw e;
-  }
-}
-
-const handle = (req, res) => {
-  const url = new URL(req.url, 'http://x');
-  const memoKey = MEMO_PATHS.has(url.pathname) ? req.url : null;
-  if (memoKey) {
-    if (memoStamp !== state.updatedAt) { memo.clear(); memoStamp = state.updatedAt; }
-    const hit = memo.get(memoKey);
-    if (hit) return json(res, hit.code, hit.body);
-  }
-  // Responde y, si el endpoint es de los pesados, guarda el resultado
-  const send = (code, body) => { if (memoKey) { if (memo.size > 400) memo.clear(); memo.set(memoKey, { code, body }); } return json(res, code, body); };
-  // Filtro opcional por jugadores del torneo, común a todos los endpoints de estadísticas.
-  const minPlayers = Math.max(0, parseInt(url.searchParams.get('minPlayers'), 10) || 0);
-  const maxPlayers = Math.max(0, parseInt(url.searchParams.get('maxPlayers'), 10) || 0);
-  // Periodo: solo últimos N días (1, 3 o 6 meses en la web); 0 = todo lo descargado.
-  const days = Math.min(DAYS, Math.max(0, parseInt(url.searchParams.get('days'), 10) || 0));
-  const records = filterRecords(state.records, { minPlayers, maxPlayers, days });
-  // dec=1: «solo partidas con ganador» (los empates salen del denominador). Afecta a todo: winrates, cartas,
-  // sinergias, variantes, tendencia, validación y también matchups y matriz (solo mesas con ganador y rivales conocidos).
-  const dec = url.searchParams.get('dec') === '1';
-  // Para matchups y matriz: con dec=1, solo mesas con ganador y rivales conocidos
-  const seatRecords = () => {
-    if (!dec) return records;
-    // Reconstruir los asientos con ganador cuesta ~150 ms: se guarda por combinación de filtros hasta la próxima actualización
-    const k = `${state.updatedAt}|${minPlayers}|${maxPlayers}|${days}`;
-    if (seatCache.stamp !== state.updatedAt) { seatCache.map.clear(); seatCache.stamp = state.updatedAt; }
-    if (!seatCache.map.has(k)) { if (seatCache.map.size >= 8) seatCache.map.clear(); seatCache.map.set(k, decisiveSeats(records)); }
-    return seatCache.map.get(k);
-  };
-  const view = dec ? decisive(records) : records;
-
-  if (url.pathname === '/api/status') {
-    return json(res, 200, {
-      mock: MOCK, updatedAt: state.updatedAt, refreshing: state.refreshing, error: state.error,
-      decks: records.length, days: DAYS, coveredDays: state.coveredDays, metaWinRate: metaWinRate(view), participantMin: PARTICIPANT_MIN,
-      tournaments: new Set(records.map(r => r.tid)).size,
-      // torneos descartados por no parecer cEDH (se guardan solo para poder avisar de ello)
-      excluded: { tournaments: excluded.size, decks: [...excluded.values()].reduce((x, y) => x + y, 0) },
-    });
-  }
-  // ---- Torneos y listas que hicieron top (solo lee los mazos ya descargados) ----
-  if (url.pathname === '/api/tournaments') {
-    return send(200, tournaments.tournamentsReport(records, { q: url.searchParams.get('q') || '', limit: Math.min(100, parseInt(url.searchParams.get('limit'), 10) || 30), offset: parseInt(url.searchParams.get('offset'), 10) || 0, sort: url.searchParams.get('sort') === 'size' ? 'size' : 'date' }));
-  }
-  if (url.pathname === '/api/regulars') {
-    const sort = ['tournaments', 'luck', 'winrate'].includes(url.searchParams.get('sort')) ? url.searchParams.get('sort') : 'tournaments';
-    return send(200, tournaments.regularsReport(view, { minTournaments: Math.min(30, Math.max(2, parseInt(url.searchParams.get('min'), 10) || 5)), sort, q: (url.searchParams.get('q') || '').slice(0, 60) }));
-  }
-  if (url.pathname === '/api/teams') {
-    return send(200, tournaments.teamsReport(view, { q: (url.searchParams.get('q') || '').slice(0, 40) }));
-  }
-  if (url.pathname === '/api/players') {
-    return send(200, tournaments.playersSearch(view, (url.searchParams.get('q') || '').slice(0, 60)));
-  }
-  if (url.pathname === '/api/player') {
-    const rep = tournaments.playerReport(view, tournaments.nameKey((url.searchParams.get('key') || '').slice(0, 80)), { meta: metaWinRate(view), seatRecords: seatRecords() });
-    return rep ? send(200, rep) : send(404, { error: 'Jugador no encontrado en este periodo' });
-  }
-  if (url.pathname === '/api/commander-decks') {
-    const g = k => (url.searchParams.get(k) || '').slice(0, 120);
-    const rep = tournaments.commanderDecksReport(records, g('name'), { q: g('q'), scope: g('scope') || 'all', sort: g('sort') || 'date', limit: parseInt(url.searchParams.get('limit'), 10) || 30, offset: parseInt(url.searchParams.get('offset'), 10) || 0 });
-    return rep ? send(200, rep) : send(404, { error: 'Comandante no encontrado' });
-  }
-  if (url.pathname === '/api/tournament') {
-    const rep = tournaments.tournamentDetail(records, url.searchParams.get('tid') || '');
-    return rep ? send(200, rep) : send(404, { error: 'Torneo no encontrado (o sin posiciones guardadas todavía)' });
-  }
-  if (url.pathname === '/api/decks') {
-    const g = k => (url.searchParams.get(k) || '').slice(0, 120);
-    return send(200, tournaments.decksReport(records, { commander: g('commander'), card: g('card'), player: g('player'), scope: g('scope') || 'cut', limit: Math.min(200, parseInt(url.searchParams.get('limit'), 10) || 60) }));
-  }
-  if (url.pathname === '/api/deck') {
-    const rep = tournaments.deckDetail(records, url.searchParams.get('tid') || '', parseInt(url.searchParams.get('rank'), 10) || 0);
-    return rep ? send(200, rep) : send(404, { error: 'Lista no encontrada' });
-  }
-  if (url.pathname === '/api/commanders') {
-    const min = Math.max(1, Number(url.searchParams.get('min')) || 5);
-    return json(res, 200, commanderList(view, min));
-  }
-  if (url.pathname === '/api/commander') {
-    const name = url.searchParams.get('name');
-    const minWith = Math.max(2, Number(url.searchParams.get('minWith')) || 5);
-    const rep = name && commanderReport(view, name, { minWith, minWithout: minWith });
-    return rep ? json(res, 200, rep) : json(res, 404, { error: 'Comandante no encontrado' });
-  }
-
-  if (url.pathname === '/api/mylist' && req.method === 'POST') {
-    let body = '';
-    req.on('data', c => { body += c; if (body.length > 200000) req.destroy(); });
-    req.on('end', () => { try {
-      let j; try { j = JSON.parse(body); } catch { return json(res, 400, { error: 'JSON no válido' }); }
-      const deck = parseText(String(j.list || ''));
-      if (!deck.cards.size || !j.commander) return json(res, 400, { error: 'Pega una lista con al menos una carta' });
-      const names = new Set(deck.cards.keys());
-      const rep = myListReport(view, j.commander, names);
-      if (rep) {
-        // Variante más parecida y listas reales parecidas (solo con datos de TopDeck)
-        const vr = variantsReport(view, j.commander, { k: 3, deckCards: names });
-        rep.variant = vr.yours ? { ...vr.variants[vr.yours.index], ...vr.yours, total: vr.variants.length, baseline: vr.baseline } : null;
-        rep.neighbors = neighborsReport(view, j.commander, names);
-      }
-      return rep ? json(res, 200, rep) : json(res, 404, { error: 'Comandante sin datos en este periodo' });
-    } catch (e) { fail(res, e); } });
-    return;
-  }
-  if (url.pathname === '/api/validation') {
-    // Usa todo el histórico (respetando solo el filtro de jugadores).
-    const all = filterRecords(state.records, { minPlayers, maxPlayers });
-    const rep = validationReport(dec ? decisive(all) : all);
-    return rep ? send(200, rep) : send(404, { error: 'Muestra insuficiente para validar' });
-  }
-  if (url.pathname === '/api/card-trend') {
-    // Como la tendencia del comandante: todo el histórico (respetando solo el filtro de jugadores por torneo)
-    const name = (url.searchParams.get('name') || '').slice(0, 200), card = (url.searchParams.get('card') || '').slice(0, 120);
-    const all = filterRecords(state.records, { minPlayers, maxPlayers });
-    const rep = name && card && cardTrendReport(dec ? decisive(all) : all, name, card);
-    return rep ? send(200, rep) : send(404, { error: 'Comandante no encontrado' });
-  }
-  if (url.pathname === '/api/trend') {
-    const name = url.searchParams.get('name');
-    // La tendencia usa todo el histórico (respetando solo el filtro de jugadores).
-    const all = filterRecords(state.records, { minPlayers, maxPlayers });
-    const rep = name && trendReport(dec ? decisive(all) : all, name);
-    return rep ? send(200, rep) : send(404, { error: 'Comandante sin datos' });
-  }
-  if (url.pathname === '/api/combos') {
-    const name = url.searchParams.get('name');
-    if (!name) return json(res, 404, { error: 'Falta el comandante' });
-    const ready = state.index ? Promise.resolve() : (state.indexPromise || Promise.resolve());
-    ready.then(async () => {
-      try {
-        const { data, t, stale } = await commanderCombos(name, req);
-        const ix = state.index;
-        const metaShare = c => { const id = ix && ix.ids.get(c.toLowerCase()); return id === undefined || !ix ? 0 : ix.decks[id].length / (ix.size || 1); };
-        const out = combos.summarize(data, records.filter(r => r.key === name), name.split(' / '), { metaShare });
-        return json(res, 200, { commander: name, ...out, fetchedAt: t, stale: !!stale });
-      } catch (e) {
-        if (e instanceof combos.ComboApiError) return json(res, e.status, { error: e.message });
-        fail(res, e);
-      }
-    });
-    return;
-  }
-  if (url.pathname === '/api/meta') {
-    // Meta del momento: presencia, resultados con intervalo, niveles, evolución y empates
-    const all = filterRecords(state.records, { minPlayers, maxPlayers });
-    const allView = dec ? decisive(all) : all;
-    const period = days ? filterRecords(allView, { days }) : allView;
-    return send(200, metaReport(allView, period));
-  }
-  if (['/api/cards', '/api/card', '/api/card-alternatives', '/api/novelties', '/api/table', '/api/threats'].includes(url.pathname)) {
-    // Consultas por carta: esperan al índice si aún se está construyendo (justo tras arrancar o actualizar)
-    const ready = state.index ? Promise.resolve(state.index) : (state.indexPromise || Promise.resolve(null));
-    ready.then(() => {
-      try {
-        const ix = state.index, q = url.searchParams;
-        if (!ix) return json(res, 503, { error: 'El buscador se está preparando; prueba en unos segundos' });
-        if (url.pathname === '/api/cards') return json(res, 200, suggestCards(ix, q.get('q')));
-        if (url.pathname === '/api/novelties') return send(200, noveltiesReport(ix, state.records, { minPlayers, maxPlayers }));
-        if (url.pathname === '/api/threats') {
-          // Cartas a tener en cuenta de un comandante: lo que lo define y remates, interacción, tutores, maná y odio
-          const name = q.get('name');
-          const shareOf = c => { const id = ix.ids.get(c.toLowerCase()); return id === undefined ? 0 : ix.decks[id].length / (ix.size || 1); };
-          const rep = name && commanderReport(view, name, { minWith: 5, minWithout: 5 });
-          if (!rep) return send(404, { error: 'Comandante sin datos con estos filtros' });
-          const decks = records.filter(r => r.key === name);
-          return send(200, { commander: name, ...threats.threatProfile(decks, shareOf),
-            defining: threats.definingCards(rep.popular, shareOf, { isBasic: c => BASICS.has(c.toLowerCase()) }) });
-        }
-        if (url.pathname === '/api/table') {
-          // Preparar mesa: tu comandante (me) y hasta tres rivales (r1, r2, r3)
-          const me = q.get('me'), rivals = ['r1', 'r2', 'r3'].map(k => q.get(k)).filter(Boolean);
-          const metaShare = c => { const id = ix.ids.get(c.toLowerCase()); return id === undefined ? 0 : ix.decks[id].length / (ix.size || 1); };
-          const rep = me && tableReport(seatRecords(), view, me, rivals, { metaShare });
-          return rep ? send(200, rep) : send(404, { error: 'Comandante sin mesas registradas con estos filtros' });
-        }
-        const name = q.get('name');
-        if (url.pathname === '/api/card-alternatives') {
-          const rep = name && alternativesReport(ix, state.records, name, q.get('commander'), { minPlayers, maxPlayers, days });
-          return rep ? send(200, rep) : send(404, { error: 'Carta o comandante no encontrados' });
-        }
-        const rep = name && cardReport(ix, state.records, name, { minPlayers, maxPlayers, days });
-        return rep ? send(200, rep) : send(404, { error: 'Carta no encontrada en los mazos de este periodo' });
-      } catch (e) { fail(res, e); }
-    });
-    return;
-  }
-  if (url.pathname === '/api/packages') {
-    // Paquetes (cartas que se juegan juntas) y alternativas (cartas que casi nunca coinciden), dentro de un comandante
-    const name = url.searchParams.get('name');
-    const rep = name && packagesReport(view, name);
-    return rep ? send(200, rep) : send(404, { error: 'Comandante sin datos' });
-  }
-  if (url.pathname === '/api/variants') {
-    const name = url.searchParams.get('name');
-    const rep = name && variantsReport(view, name, { k: parseInt(url.searchParams.get('k'), 10) || 3, detail: url.searchParams.get('detail') === '1' });
-    return rep ? send(200, rep) : send(404, { error: 'Comandante sin datos' });
-  }
-  if (url.pathname === '/api/matchups') {
-    const name = url.searchParams.get('name');
-    const minPods = Math.max(5, Number(url.searchParams.get('minPods')) || 15);
-    const rep = name && matchups(seatRecords(), name, { minPods });
-    return rep ? send(200, rep) : send(404, { error: 'Comandante sin mesas registradas' });
-  }
-  if (url.pathname === '/api/matrix') {
-    const top = Math.min(20, Math.max(3, Number(url.searchParams.get('top')) || 12));
-    return send(200, matrix(seatRecords(), top));
-  }
-  if (url.pathname === '/api/cards-vs') {
-    const name = url.searchParams.get('name'), vs = url.searchParams.get('vs');
-    const minWith = Math.max(5, Number(url.searchParams.get('minWith')) || 15);
-    const rep = name && vs && cardsVsOpponent(seatRecords(), name, vs, { minWith });
-    return rep ? send(200, rep) : send(404, { error: 'Sin datos para ese enfrentamiento' });
-  }
-
-  // Estáticos (con protección frente a path traversal)
-  const rel = url.pathname === '/' ? 'index.html' : url.pathname.slice(1);
-  const file = path.normalize(path.join(PUBLIC, rel));
-  if (!file.startsWith(PUBLIC + path.sep) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
-    res.writeHead(404); return res.end('No encontrado');
-  }
-  return serveStatic(res, file);
-};
-
-// Cabeceras de seguridad en todas las respuestas. La web no usa scripts ni manejadores en línea (los estilos en línea sí),
-// y solo habla con este servidor y con Scryfall (imágenes y tipos de carta, desde el navegador).
-const SECURITY_HEADERS = {
-  'Content-Security-Policy': ["default-src 'self'", "script-src 'self'", "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: https://api.scryfall.com https://*.scryfall.io", "connect-src 'self' https://api.scryfall.com",
-    "object-src 'none'", "base-uri 'none'", "form-action 'none'", "frame-ancestors 'none'"].join('; '),
-  'X-Content-Type-Options': 'nosniff',
-  'X-Frame-Options': 'DENY',
-  'Referrer-Policy': 'strict-origin-when-cross-origin',
-  'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=()',
-};
-
-// Un error inesperado en una petición no debe tumbar el servidor: se responde 500 y se sigue.
+const handle = createHandler({ state, excluded, config: { MOCK, DAYS, PARTICIPANT_MIN, COMBOS_API: process.env.COMBOS_API || combos.DEFAULT_API, PUBLIC } });
 const server = http.createServer((req, res) => {
   for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.setHeader(k, v);
   try { handle(req, res); } catch (e) { fail(res, e); }
 });
-function fail(res, e) {
-  console.error('Error en la petición:', e && e.stack || e);
-  if (!res.headersSent) { try { json(res, 500, { error: 'Error interno' }); } catch { res.destroy(); } } else res.end();
-}
 // Red de seguridad para errores fuera de una petición (por ejemplo en una actualización)
 process.on('uncaughtException', e => console.error('Error no controlado:', e && e.stack || e));
 process.on('unhandledRejection', e => console.error('Promesa rechazada:', e && e.stack || e));
