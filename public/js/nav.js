@@ -18,7 +18,7 @@ export function writeHash() {
 export function readHash() {
   const h = new URLSearchParams(location.hash.slice(1));
   const d = Number(h.get('d'));
-  if ([30, 90, 180].includes(d)) F.days = d;
+  if ([30, 90, 180, 365].includes(d)) F.days = d;
   if (h.get('dec') === '1') F.dec = 1;
   F.min = h.get('min') || ''; F.max = h.get('max') || '';
   $('#fmin').value = F.min; $('#fmax').value = F.max;

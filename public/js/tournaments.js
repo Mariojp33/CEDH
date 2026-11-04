@@ -25,7 +25,7 @@ function showTournament(t, det, dk) {
 }
 export async function bindTournaments() {
   const q = $('#tr-q'), sort = $('#tr-sort'), out = $('#tr-out'), more = $('#tr-more'), det = $('#tr-det'), dk = $('#tr-deck');
-  const PAGE = 40, per = { 30: 'el último mes', 90: 'los últimos 3 meses', 180: 'los últimos 6 meses' }[F.days] || `los últimos ${F.days} días`;
+  const PAGE = 40, per = { 30: 'el último mes', 90: 'los últimos 3 meses', 180: 'los últimos 6 meses', 365: 'los últimos 12 meses' }[F.days] || `los últimos ${F.days} días`;
   let timer, seq = 0, shown = 0;
   const rowsOf = list => list.map(t => `<tr>
       <td class="muted" data-v="${t.date}">${dateEs(t.date)}</td><td>${esc(short(String(t.name || ''), 52))}${t.elo ? ` <span class="muted" title="Elo medio de los jugadores">· Elo ${t.elo}</span>` : ''}</td><td class="n">${t.size}</td>

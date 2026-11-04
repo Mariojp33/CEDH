@@ -16,6 +16,7 @@ async function loadStatus() {
     (st.error ? (/^Sin clave/.test(st.error)
       ? `<div class="banner demo"><b>Aviso:</b> ${esc(st.error)}.</div>`            // no es un fallo: solo falta la clave de TopDeck
       : `<div class="banner">Error al actualizar: ${esc(st.error)}</div>`) : '');
+  $('#p365').hidden = !(st.days >= 365);   // el servidor ofrece 12 meses solo si se arrancó con DAYS=365
   F.meta = st.metaWinRate ?? 0.25;
   return st;
 }
@@ -115,7 +116,7 @@ export function bindGlobalSearch() {
 
 // ---- Filtros plegables: el resumen siempre dice qué hay elegido ----
 export function updateFilterSummary() {
-  const per = { 30: '1 mes', 90: '3 meses', 180: '6 meses' }[F.days] || `${F.days} días`;
+  const per = { 30: '1 mes', 90: '3 meses', 180: '6 meses', 365: '12 meses' }[F.days] || `${F.days} días`;
   const pl = (F.min || F.max) ? `${F.min || 0}–${F.max || '∞'} jugadores` : 'todos los tamaños';
   $('#fsum').textContent = `Filtros · ${per} · empates ${F.dec ? 'fuera del cálculo' : 'cuentan como no ganadas'} · ${pl}`;
 }

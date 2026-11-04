@@ -56,7 +56,7 @@ La primera carga descarga `DAYS` días (por defecto 180) en ventanas de 7 días,
 | `TOPDECK_API_KEY` | — | Clave de la API. Sin ella no hay actualización en directo (se usa solo el seed); `MOCK=1` prueba sin clave |
 | `COMBOS_API` | API de Commander Spellbook | Dirección de la API de combos (para pruebas) |
 | `SEED_URL` | release `seed` del repositorio | De dónde se descarga el seed al arrancar (vacío = no descargar) |
-| `DAYS` | 180 | Histórico descargado (máximo elegible en la web) |
+| `DAYS` | 180 | Histórico descargado (máximo elegible en la web). Con `DAYS=365` aparece el botón «12 meses» en los filtros; ver «Histórico de 12 meses» |
 | `PARTICIPANT_MIN` | 16 | Mínimo de jugadores por torneo |
 | `REFRESH_HOURS` | 6 | Frecuencia de actualización |
 | `PORT` | 3000 | Puerto |
@@ -123,4 +123,8 @@ Todos aceptan además `dec=1` (empates fuera del cálculo). Las respuestas se co
 
 ## Comprobación contra la API real
 
-`TOPDECK_API_KEY=tu_clave npm run check` hace una sola petición (últimos 3 días, `DAYS=14` para más) e imprime solo estructura y recuentos: formato de `deckObj`, porcentaje de listas utilizables, estados y tamaños de mesa, y si los jugadores de las mesas se encuentran en la clasificación. No muestra la clave ni nombres de jugadores. `node scripts/check.js --mock` prueba el propio script con datos sintéticos.
+`### Histórico de 12 meses
+
+Medido con el seed real (38.899 mazos = 6 meses) y repitiéndolo para simular 12 meses (77.798 mazos): el cálculo no es un problema (filtrar 4 ms, «solo con ganador» 62 ms, lista de comandantes 12 ms, informe de Meta 18 ms; el índice de cartas pasa de 0,5 s a 1 s). Lo que crece es la memoria: unos 220 MB en reposo con 6 meses y unos 320 MB con 12, y el pico al arrancar es mayor (hay que leer y decodificar un archivo de ~50 MB). En un hosting de 512 MB queda justo; con 1 GB sobra. Para activarlo: `DAYS=365` en el servidor (y en el workflow del seed, que tiene 30 minutos de límite: la primera descarga completa puede necesitar más). No se ha comprobado cuánto histórico conserva la API de TopDeck.
+
+TOPDECK_API_KEY=tu_clave npm run check` hace una sola petición (últimos 3 días, `DAYS=14` para más) e imprime solo estructura y recuentos: formato de `deckObj`, porcentaje de listas utilizables, estados y tamaños de mesa, y si los jugadores de las mesas se encuentran en la clasificación. No muestra la clave ni nombres de jugadores. `node scripts/check.js --mock` prueba el propio script con datos sintéticos.

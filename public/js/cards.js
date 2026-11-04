@@ -60,7 +60,7 @@ async function searchCard(name) {
     const last = r.trend[r.trend.length - 1], prev = r.trend[r.trend.length - 2];
     const delta = last && prev && last.share != null && prev.share != null ? last.share - prev.share : null;
     const isNew = r.firstSeen && r.dataStart && r.firstSeen - r.dataStart > 14 * 86400000;
-    const per = { 30: 'último mes', 90: 'últimos 3 meses', 180: 'últimos 6 meses' }[F.days] || `últimos ${F.days} días`;
+    const per = { 30: 'último mes', 90: 'últimos 3 meses', 180: 'últimos 6 meses', 365: 'últimos 12 meses' }[F.days] || `últimos ${F.days} días`;
     out.innerHTML = `
       <div class="panel">
         <div class="cardfig" id="cs-img"></div>
