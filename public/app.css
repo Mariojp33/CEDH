@@ -540,3 +540,9 @@ table.mcards td:first-child .av { margin-right: 6px; }
   table:has(#rows) .pips { display: none; }
   table:has(#rows) .av { width: 20px; height: 20px; margin-right: 6px; }
 }
+
+/* Enlaces con el color de la marca; ficha de comandante con su arte */
+a { color: var(--accent); }
+.head h2 { display: flex; align-items: center; flex-wrap: wrap; }
+.head h2 .av { width: 42px; height: 42px; margin-right: 12px; }
+.head h2 .pips { margin-left: 10px; } .head h2 .pips i { width: 12px; height: 12px; }

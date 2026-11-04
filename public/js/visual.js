@@ -60,7 +60,7 @@ function decorate(el) {
   }));
 }
 
-const SELECTOR = '#app [data-open-cmd], #app #rows .cn';
+const SELECTOR = '#app [data-open-cmd], #app #rows .cn, #app .head h2 .cn';
 const io = 'IntersectionObserver' in window ? new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { io.unobserve(e.target); decorate(e.target); } }), { rootMargin: '200px' }) : null;
 export function watchCommanders(root) {
   const run = () => root.querySelectorAll(SELECTOR.replace('#app ', '')).forEach(el => { if (!el.dataset.dec && !el.dataset.obs) { el.dataset.obs = '1'; io ? io.observe(el) : decorate(el); } });
