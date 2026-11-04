@@ -1,8 +1,9 @@
 import { $, F, api, cardBtn, cmdBtn, cmdLabel, dayMonth, esc, pct, pp } from './core.js';
 
 // ---- Alertas: cambios claros del último periodo frente a los dos anteriores ----
-function alertsHtml(alerts) {
-  if (!alerts.length) return '<div class="alerts quiet">Sin cambios claros en el último periodo: nadie sube ni baja más de lo que explicaría el azar.</div>';
+function alertsHtml(alerts, partial, decks) {
+  const warn = partial ? `<p class="muted">⚠ El último periodo tiene pocos mazos (${decks}) frente a los anteriores: puede estar incompleto y los cambios son menos fiables.</p>` : '';
+  if (!alerts.length) return warn + '<div class="alerts quiet">Sin cambios claros en el último periodo: nadie sube ni baja más de lo que explicaría el azar.</div>';
   const row = a => {
     const up = a.direction === 'up', arrow = up ? '▲' : '▼', cls = up ? 'pos-t' : 'neg-t';
     const what = a.kind === 'presence'
@@ -10,7 +11,7 @@ function alertsHtml(alerts) {
       : `winrate <b>${pct(a.to, 1)}</b> <span class="${cls}">${pp(a.change)}</span> frente a los dos periodos anteriores`;
     return `<li><span class="${cls}">${arrow}</span> ${cmdBtn(a.commander)} <span class="muted">${what}</span></li>`;
   };
-  return `<div class="alerts"><h2>Cambios claros del último periodo</h2><ul>${alerts.map(row).join('')}</ul>
+  return `<div class="alerts"><h2>Cambios claros del último periodo</h2>${warn}<ul>${alerts.map(row).join('')}</ul>
     <details class="note"><summary>¿Cómo se decide qué es «claro»?</summary>Se compara el último periodo de 30 días con los dos anteriores. Solo aparece un cambio si es estadísticamente claro (z ≥ 3, exigente porque se miran decenas de comandantes a la vez) y de tamaño apreciable: al menos 1 punto de presencia o 3 puntos de winrate, con 60 partidas o más en cada lado. Es una descripción de qué ha cambiado, no una predicción.</details></div>`;
 }
 
@@ -62,7 +63,7 @@ export async function loadMeta() {
         ${tile('Más sube', up.change > 0 ? up : null, `${pp(up.change)} de presencia`, 'pos-t')}
         ${tile('Más baja', down.change < 0 ? down : null, `${pp(down.change)} de presencia`, 'neg-t')}
       </div>
-      ${alertsHtml(r.alerts || [])}
+      ${alertsHtml(r.alerts || [], r.recentPartial, r.recentDecks)}
       <div class="muted">${r.decksInPeriod} mazos cEDH · winrate medio <b>${pct(r.mean)}</b> ${F.dec ? '(solo partidas con ganador)' : '(empates como no ganadas)'}.</div>
 
       <h2 style="margin-top:18px">Presencia en el meta, mes a mes</h2>
@@ -72,7 +73,7 @@ export async function loadMeta() {
 
       <h2 style="margin-top:20px">Niveles por resultados</h2>
       <div class="tiers">${tiers}</div>
-      <details class="note"><summary>¿Cómo se calcula el nivel?</summary>El nivel sale del <b>intervalo de confianza del winrate</b> frente a la media del meta (${pct(r.mean)}): S y D solo si el intervalo queda a más de 2 puntos de la media; A y C si queda entero por encima o por debajo; B si no se distingue de la media (poca muestra o rendimiento medio). Solo entran los comandantes con ${r.minDecks} mazos o más. <b>Es una descripción de resultados, no de la fuerza del mazo</b>: el winrate refleja también al jugador y al plan.</details>
+      <details class="note"><summary>¿Cómo se calcula el nivel?</summary>El nivel sale del <b>rango probable del winrate</b> frente a la media del meta (${pct(r.mean)}): S y D solo si el rango queda a más de 2 puntos de la media; A y C si queda entero por encima o por debajo; B si no se distingue de la media (poca muestra o rendimiento medio). Solo entran los comandantes con ${r.minDecks} mazos o más. <b>Es una descripción de resultados, no de la fuerza del mazo</b>: el winrate refleja también al jugador y al plan.</details>
 
       <div class="cols wide" style="margin-top:20px">
         <div><h2>Suben en presencia</h2><table><thead><tr><th>Comandante</th><th class="n">Ahora</th><th class="n" title="Último periodo frente a la media de los dos anteriores">Cambio</th></tr></thead><tbody>${mv(movers.slice(0, 5))}</tbody></table></div>

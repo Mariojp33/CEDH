@@ -6,8 +6,8 @@ export const guideHtml = () => `<div class="panel guide">
   <p>El winrate es victorias entre partidas jugadas. Se compara con la <b>media del meta</b> del periodo elegido, no con el 25 % teórico de una mesa de 4, porque los empates (en torno a una de cada cinco partidas) hacen que la media real quede por debajo. Una diferencia de «+3 pts» son tres puntos porcentuales: un 28 % frente a una media del 25 %.</p>
   <h3>Empates</h3>
   <p>Por defecto un empate cuenta como partida no ganada (winrate = victorias ÷ todas las partidas), por eso la media del meta queda por debajo del 25 %. Puedes cambiarlo en los filtros para que los empates salgan del cálculo (winrate = victorias ÷ victorias + derrotas, con la referencia en torno al 25 %). La tasa de empates se muestra aparte: es una característica estable de cada comandante.</p>
-  <h3>Intervalos y colores</h3>
-  <p>Cada winrate tiene un intervalo de confianza del 95 %. Solo se pinta de verde o rojo cuando ese intervalo queda entero por encima o por debajo de la media; en <b>gris</b> no se distingue de ella, normalmente por falta de partidas. Los niveles S-D de «Meta» salen de ese mismo intervalo, así que un mazo con pocas partidas no sube por suerte.</p>
+  <h3>Rango probable y colores</h3>
+  <p>Cada winrate tiene un rango probable (con 95 % de confianza). Solo se pinta de verde o rojo cuando ese rango queda entero por encima o por debajo de la media; en <b>gris</b> no se distingue de ella, normalmente por falta de partidas. Los niveles S-D de «Meta» salen de ese mismo rango, así que un mazo con pocas partidas no sube por suerte.</p>
   <h3>Lo que esta web no prueba</h3>
   <p>El winrate asociado a una carta o a un combo es una <b>correlación, no una mejora demostrada</b>: refleja sobre todo quién juega la carta y con qué plan. Lo comprobamos con cambios reales de lista de los mismos jugadores y no se confirmó, por eso las recomendaciones de «Revisar mi lista» se basan en lo que juegan listas parecidas y no en el winrate de cada carta. En «Fiabilidad del método» ves qué parte de las conclusiones se mantiene en datos nuevos.</p>
   <h3>Combos y cartas por función</h3>

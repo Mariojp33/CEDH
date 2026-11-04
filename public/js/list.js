@@ -45,7 +45,7 @@ export function renderList() {
       <table style="margin-top:12px"><thead><tr>
         <th>Comandante</th><th class="n">Mazos</th><th class="n">Presencia en el meta</th><th>Winrate <small class="muted">· media ${pct(F.meta)}</small></th><th class="n">vs media</th><th class="n" title="Partidas empatadas sobre el total">Empates</th>
       </tr></thead><tbody id="rows"></tbody></table>
-      <details class="note"><summary>¿Cómo se lee?</summary>La referencia es la <b>media del meta</b> en el periodo elegido (${pct(F.meta)}). ${drawNote()} Verde o rojo solo si el intervalo de confianza al 95 % queda entero por encima o por debajo de la media; en <b>gris</b> no se distingue de ella (suele ser falta de partidas). Se cuentan las partidas suizas y las eliminatorias.</details>
+      <details class="note"><summary>¿Cómo se lee?</summary>La referencia es la <b>media del meta</b> en el periodo elegido (${pct(F.meta)}). ${drawNote()} Verde o rojo solo si el rango probable del winrate queda entero por encima o por debajo de la media; en <b>gris</b> no se distingue de ella (suele ser falta de partidas). Se cuentan las partidas suizas y las eliminatorias.</details>
     </div>`) +
     tabPanel('meta', active, `<div id="meta-host"></div>`) +
     tabPanel('torneos', active, `<div id="tor-host"></div>`) +

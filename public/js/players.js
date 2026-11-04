@@ -181,7 +181,7 @@ export async function bindTeams() {
   load();
 }
 export const regularsHtml = () => `<div class="panel">
-    <h2>Jugadores habituales</h2>
+    
     <div class="muted" style="margin-bottom:8px">Quienes juegan torneos con frecuencia, con cuántas veces han pasado el top cut y ganado un torneo <b>frente a lo que saldría solo por azar</b>. No es un ranking de nivel: con pocos torneos, estar por encima del azar suele ser suerte, por eso se marca como «por encima del azar» solo a quien lo es de forma clara tras corregir por mirar a muchos jugadores a la vez. Se agrupa por el nombre con el que juegan en TopDeck.</div>
     <div class="tablepick">
       <label>Mínimo de torneos <select id="rg-min"><option value="3">3</option><option value="5" selected>5</option><option value="8">8</option><option value="12">12</option></select></label>
