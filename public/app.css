@@ -567,3 +567,9 @@ td .ghost { white-space: nowrap; }
 
 /* Frase de conclusión de la ficha */
 .verdict { margin-top: 10px; padding: 10px 14px; background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: var(--radius-sm); font-size: 15px; box-shadow: var(--shadow-1); }
+
+/* Secciones plegables dentro de una pestaña (Jugadores: habituales y equipos) */
+details.sect { margin-bottom: 12px; }
+details.sect > summary { cursor: pointer; padding: 12px 16px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-1); font-weight: 600; font-size: 15px; }
+details.sect[open] > summary { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+details.sect > .panel { border-top: 0; border-top-left-radius: 0; border-top-right-radius: 0; margin-bottom: 0; }

@@ -11,13 +11,25 @@ import { sortTable } from './sorttable.js';
 import { bindTableTool } from './table.js';
 import { bindTopDecks, bindTournaments, topDecksHtml, torneosHtml } from './tournaments.js';
 
-const loadTorneos = () => subTabs($('#tor-host'), [
-  { id: 'torneos', label: 'Torneos', html: torneosHtml(), load: bindTournaments },
-  { id: 'listas', label: 'Buscar listas top', html: topDecksHtml(), load: bindTopDecks },
-  { id: 'jugadores', label: 'Jugadores', html: playersHtml(), load: bindPlayers },
-  { id: 'habituales', label: 'Habituales', html: regularsHtml(), load: bindRegulars },
-  { id: 'equipos', label: 'Equipos', html: teamsHtml(), load: bindTeams },
-]);
+// Habituales y Equipos viven dentro de Jugadores como secciones plegables que cargan al abrirse (3 apartados en vez de 5)
+const playersSections = () => playersHtml() +
+  `<details class="sect" id="reg-d"><summary>Jugadores habituales</summary>${regularsHtml()}</details>` +
+  `<details class="sect" id="team-d"><summary>Equipos</summary>${teamsHtml()}</details>`;
+function bindPeople() {
+  bindPlayers();
+  const lazy = (id, bind) => { const d = $(id); let done = false; const go = () => { if (d.open && !done) { done = true; bind(); } }; d.addEventListener('toggle', go); go(); };
+  lazy('#reg-d', bindRegulars); lazy('#team-d', bindTeams);
+  const want = ui.view.open; if (want) { const d = $(want === 'equipos' ? '#team-d' : '#reg-d'); if (d) { d.open = true; d.scrollIntoView(); } ui.view.open = undefined; }
+}
+const loadTorneos = () => {
+  // Los enlaces antiguos a «Habituales» y «Equipos» abren Jugadores con esa sección desplegada
+  if (ui.view.sub === 'habituales' || ui.view.sub === 'equipos') { ui.view.open = ui.view.sub; ui.view.sub = 'jugadores'; }
+  subTabs($('#tor-host'), [
+    { id: 'torneos', label: 'Torneos', html: torneosHtml(), load: bindTournaments },
+    { id: 'listas', label: 'Buscar listas top', html: topDecksHtml(), load: bindTopDecks },
+    { id: 'jugadores', label: 'Jugadores', html: playersSections(), load: bindPeople },
+  ]);
+};
 
 
 export function renderList() {

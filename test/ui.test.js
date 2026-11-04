@@ -97,13 +97,13 @@ async function scenario(name) {
   out.jugador.sugerencias = $$('#pl-sug button').length;
   out.jugador.paneles = $$('#pl-out h2').map(h => h.textContent);
   // Habituales y equipos
-  document.querySelector('#tor-host [data-sub=habituales]').click();
+  document.getElementById('reg-d').open = true;
   await until(() => document.querySelector('#rg-out table'), 60);
   const rg = $$('#rg-out tbody tr');
   const sortRg = document.getElementById('rg-sort'); sortRg.value = 'winrate'; sortRg.dispatchEvent(new Event('change')); await wait(1500);
   const wrsRg = $$('#rg-out tbody tr').map(tr => parseFloat(tr.cells[4].textContent));
   out.habituales = { filas: rg.length, ordenWinrate: wrsRg.every((v, i) => i === 0 || wrsRg[i - 1] >= v), resumen: /con al menos 5 torneos con puesto/.test(document.getElementById('rg-out').textContent) };
-  document.querySelector('#tor-host [data-sub=equipos]').click();
+  document.getElementById('team-d').open = true;
   await until(() => document.querySelector('#tm-out table'), 60);
   out.equipos = { filas: $$('#tm-out tbody tr').length, etiquetas: $$('#tm-out tbody tr').map(tr => tr.cells[0].textContent) };
   document.querySelector('#tor-host [data-sub=listas]').click();
@@ -254,7 +254,7 @@ test('interfaz: recorrido por secciones, buscador único, ficha y «Revisar mi l
   assert.deepStrictEqual(r.meta.apartados, ['Panorama', 'Novedades de cartas']);
   assert.ok(r.meta.niveles >= 3 && /t=meta&s=panorama/.test(r.meta.hash.replace(/&amp;/g, '&')));
   assert.ok(r.novedades.cargado && /s=novedades/.test(r.novedades.hash));
-  assert.deepStrictEqual(r.torneos.apartados, ['Torneos', 'Buscar listas top', 'Jugadores', 'Habituales', 'Equipos']);
+  assert.deepStrictEqual(r.torneos.apartados, ['Torneos', 'Buscar listas top', 'Jugadores']);
   assert.ok(r.habituales.filas > 5 && r.habituales.ordenWinrate && r.habituales.resumen, 'jugadores habituales con orden');
   assert.ok(r.equipos.filas >= 1 && r.equipos.etiquetas.some(t => /^Equipo \d$/.test(t)), 'equipos por etiqueta: ' + r.equipos.etiquetas.slice(0, 5));
   assert.strictEqual(r.jugador.subtab, 'Jugadores'); assert.strictEqual(r.jugador.titulo.replace(/\s*\[.*?\]/g, '').trim().toLowerCase(), r.jugador.nombreTxt.replace(/\s*\[.*?\]/g, '').trim().toLowerCase());
