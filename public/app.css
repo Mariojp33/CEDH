@@ -546,3 +546,13 @@ a { color: var(--accent); }
 .head h2 { display: flex; align-items: center; flex-wrap: wrap; }
 .head h2 .av { width: 42px; height: 42px; margin-right: 12px; }
 .head h2 .pips { margin-left: 10px; } .head h2 .pips i { width: 12px; height: 12px; }
+
+/* Alertas de Meta */
+.alerts { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-1); padding: 12px 16px; margin-bottom: 12px; }
+.alerts h2 { margin: 0 0 6px; font-size: 15px; }
+.alerts ul { list-style: none; margin: 0; padding: 0; columns: 2 380px; column-gap: 24px; }
+.alerts li { padding: 4px 0; break-inside: avoid; font-size: 13.5px; }
+.alerts.quiet { color: var(--muted); font-size: 13.5px; }
+.kpi b { flex-wrap: nowrap; }
+.kpi b .linklike { text-align: left; min-width: 0; }
+.kpi b .av, .kpi b .pips { flex: none; }

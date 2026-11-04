@@ -1,5 +1,19 @@
 import { $, F, api, cardBtn, cmdBtn, cmdLabel, dayMonth, esc, pct, pp } from './core.js';
 
+// ---- Alertas: cambios claros del último periodo frente a los dos anteriores ----
+function alertsHtml(alerts) {
+  if (!alerts.length) return '<div class="alerts quiet">Sin cambios claros en el último periodo: nadie sube ni baja más de lo que explicaría el azar.</div>';
+  const row = a => {
+    const up = a.direction === 'up', arrow = up ? '▲' : '▼', cls = up ? 'pos-t' : 'neg-t';
+    const what = a.kind === 'presence'
+      ? `presencia <b>${pct(a.from, 1)} → ${pct(a.to, 1)}</b> <span class="${cls}">${pp(a.change)}</span>`
+      : `winrate <b>${pct(a.to, 1)}</b> <span class="${cls}">${pp(a.change)}</span> frente a los dos periodos anteriores`;
+    return `<li><span class="${cls}">${arrow}</span> ${cmdBtn(a.commander)} <span class="muted">${what}</span></li>`;
+  };
+  return `<div class="alerts"><h2>Cambios claros del último periodo</h2><ul>${alerts.map(row).join('')}</ul>
+    <details class="note"><summary>¿Cómo se decide qué es «claro»?</summary>Se compara el último periodo de 30 días con los dos anteriores. Solo aparece un cambio si es estadísticamente claro (z ≥ 3, exigente porque se miran decenas de comandantes a la vez) y de tamaño apreciable: al menos 1 punto de presencia o 3 puntos de winrate, con 60 partidas o más en cada lado. Es una descripción de qué ha cambiado, no una predicción.</details></div>`;
+}
+
 // ---- Meta del momento ----
 const TIERS = {
   S: 'Claramente por encima de la media', A: 'Por encima de la media', B: 'En la media o sin datos claros',
@@ -36,7 +50,10 @@ export async function loadMeta() {
     box.className = 'muted-reset';
     const solid = r.commanders.filter(c => c.decks >= r.minDecks);
     const best = [...solid].sort((a, b) => b.winRate - a.winRate)[0], most = r.commanders[0];
-    const up = movers[0], down = movers[movers.length - 1];
+    const clear = (kind, dir) => (r.alerts || []).find(a => a.kind === kind && a.direction === dir);
+    const upA = clear('presence', 'up'), downA = clear('presence', 'down');
+    const byName = n => r.commanders.find(c => c.commander === n);
+    const up = upA ? { ...byName(upA.commander), change: upA.change } : { change: 0 }, down = downA ? { ...byName(downA.commander), change: downA.change } : { change: 0 };
     const tile = (label, c, val, cls = '') => c ? `<div class="kpi"><small>${label}</small><b>${cmdBtn(c.commander)}</b><span class="${cls}">${val}</span></div>` : '';
     box.innerHTML = `
       <div class="kpis">
@@ -45,6 +62,7 @@ export async function loadMeta() {
         ${tile('Más sube', up.change > 0 ? up : null, `${pp(up.change)} de presencia`, 'pos-t')}
         ${tile('Más baja', down.change < 0 ? down : null, `${pp(down.change)} de presencia`, 'neg-t')}
       </div>
+      ${alertsHtml(r.alerts || [])}
       <div class="muted">${r.decksInPeriod} mazos cEDH · winrate medio <b>${pct(r.mean)}</b> ${F.dec ? '(solo partidas con ganador)' : '(empates como no ganadas)'}.</div>
 
       <h2 style="margin-top:18px">Presencia en el meta, mes a mes</h2>
@@ -103,8 +121,8 @@ export async function loadHighlights(box) {
       api('/api/meta').catch(() => null), api('/api/novelties').catch(() => null), api('/api/tournaments?limit=1', { days: 0 }).catch(() => null),
     ]);
     const items = [];
-    const up = m && m.commanders.length && [...m.commanders].sort((a, b) => b.change - a.change)[0];
-    if (up && up.change > 0.005) items.push(['En alza', cmdBtn(up.commander), `<span class="pos-t">${pp(up.change)}</span> de presencia en el meta`]);
+    const up = m && (m.alerts || []).find(a => a.kind === 'presence' && a.direction === 'up');
+    if (up) items.push(['En alza', cmdBtn(up.commander), `<span class="pos-t">${pp(up.change)}</span> de presencia en el meta`]);
     const card = n && !n.tooFew && n.rising && n.rising[0];
     if (card) items.push(['Carta en ascenso', cardBtn(card.card), `<span class="pos-t">${pp(card.change)}</span> en el último mes · ${pct(card.recent, 0)} de los mazos`]);
     const tor = t && t.tournaments && t.tournaments[0], champ = tor && tor.top && tor.top[0];

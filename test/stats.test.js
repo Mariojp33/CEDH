@@ -493,6 +493,28 @@ test('metaReport: niveles por intervalo de confianza, presencia por mes y empate
   assert.ok(r.mean > 0 && r.mean < 1);
 });
 
+test('metaReport: las alertas solo recogen cambios claros de presencia y de winrate, no el ruido', () => {
+  const { metaReport } = require('../lib/meta');
+  const recs = [];
+  const put = (key, n, age, o) => { for (let i = 0; i < n; i++) recs.push(mkDeck(key, ['A'], { age: age + (i % 20), ...o })); };
+  // Último periodo (hace ~10 días) frente a los dos anteriores (hace ~40 y ~70 días)
+  put('Sube', 400, 5, { wins: 1, losses: 3 }); put('Sube', 100, 40, { wins: 1, losses: 3 }); put('Sube', 100, 70, { wins: 1, losses: 3 });
+  put('Baja', 50, 5, { wins: 1, losses: 3 });  put('Baja', 300, 40, { wins: 1, losses: 3 }); put('Baja', 300, 70, { wins: 1, losses: 3 });
+  put('Estable', 250, 5, { wins: 1, losses: 3 }); put('Estable', 250, 40, { wins: 1, losses: 3 }); put('Estable', 250, 70, { wins: 1, losses: 3 });
+  put('Mejora', 200, 5, { wins: 3, losses: 3 }); put('Mejora', 200, 40, { wins: 1, losses: 4 }); put('Mejora', 200, 70, { wins: 1, losses: 4 });
+  const r = metaReport(recs, recs, { minDecks: 40 });
+  const al = (k, kind) => r.alerts.find(a => a.commander === k && a.kind === kind);
+  assert.ok(al('Sube', 'presence') && al('Sube', 'presence').direction === 'up', 'sube de forma clara');
+  assert.ok(al('Baja', 'presence') && al('Baja', 'presence').direction === 'down', 'baja de forma clara');
+  assert.ok(al('Mejora', 'winrate') && al('Mejora', 'winrate').direction === 'up', 'su winrate sube de forma clara');
+  assert.ok(!r.alerts.some(a => a.commander === 'Estable'), 'lo estable no genera alertas');
+  assert.ok(r.alerts.every(a => Math.abs(a.z) >= 3), 'todas superan el umbral');
+  assert.ok(r.alerts.length <= 10);
+  // con muy pocos mazos recientes no se dispara nada
+  const few = [...recs.filter(x => x.date < NOW() - 30 * 86400), ...recs.filter(x => x.key === 'Sube' && x.date >= NOW() - 30 * 86400).slice(0, 5)];
+  assert.ok(!metaReport(few, few, { minDecks: 40 }).alerts.some(a => a.commander === 'Sube' && a.kind === 'winrate'));
+});
+
 test('noveltiesReport: detecta cartas nuevas, en ascenso y en descenso, ignorando el ruido', () => {
   const { buildCardIndex, noveltiesReport } = require('../lib/cardindex');
   const recs = [];
