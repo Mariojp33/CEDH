@@ -556,3 +556,4 @@ a { color: var(--accent); }
 .kpi b { flex-wrap: nowrap; }
 .kpi b .linklike { text-align: left; min-width: 0; }
 .kpi b .av, .kpi b .pips { flex: none; }
+.cmpverdict { margin-top: 10px; padding: 8px 12px; background: var(--accent-soft); border-radius: var(--radius-sm); font-size: 14px; }

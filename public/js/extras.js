@@ -230,38 +230,64 @@ export async function loadPackages(name) {
 }
 
 // Comparar dos comandantes lado a lado.
+const BASIC_LAND = /^(snow-covered )?(plains|island|swamp|mountain|forest|wastes)$/i;
+const zTwo = (w1, n1, w2, n2) => {
+  if (!n1 || !n2) return 0;
+  const p = (w1 + w2) / (n1 + n2), se = Math.sqrt(p * (1 - p) * (1 / n1 + 1 / n2));
+  return se ? (w1 / n1 - w2 / n2) / se : 0;
+};
+
 export async function openCompare(a, b) {
   ui.view = { t: 'cmp', a, b }; writeHash();
   $('#app').innerHTML = '<div class="muted">Calculando…</div>';
-  const [ra, rb, mu] = await Promise.all([
-    api(`/api/commander?name=${encodeURIComponent(a)}`), api(`/api/commander?name=${encodeURIComponent(b)}`),
-    api(`/api/matchups?name=${encodeURIComponent(a)}`).catch(() => ({ rows: [] }))]);
-  const h2h = mu.rows.find(x => x.opponent === b);
-  const col = r => {
-    const cards = (l, sign) => l.filter(c => c.q < 0.25).slice(0, 8)
-      .map(c => `<tr><td>${cn(c.card)}</td><td class="n">${pct(c.inclusion, 0)}</td><td class="n ${sign}">${pp(c.adj)}</td></tr>`).join('') || '<tr><td class="muted">Sin datos fiables</td></tr>';
-    return `<div class="panel">
-      <h2>${cn(r.commander)}</h2>
-      <div class="wr"><b>${pct(r.winRate)}</b>${track(r.winRate - r.baseline, .10, !sig(r.ci, r.baseline))}</div>
-      <div class="muted" style="margin:6px 0 10px">IC 95 %: ${pct(r.ci[0])}–${pct(r.ci[1])} · ${pp(r.winRate - r.baseline)} frente a la media del meta</div>
-      <table><tbody><tr><td>Mazos</td><td class="n">${r.decks}</td></tr><tr><td>Torneos</td><td class="n">${r.tournaments}</td></tr>
-        <tr><td>Partidas</td><td class="n">${r.games}</td></tr><tr><td>Empates</td><td class="n">${pct(r.drawRate)}</td></tr></tbody></table>
-      <h2 style="margin-top:14px">Cartas que más ayudan</h2>
-      <table><thead><tr><th>Carta</th><th class="n">En mazos</th><th class="n">Ajustada</th></tr></thead><tbody>${cards(r.best, 'pos-t')}</tbody></table>
-      <h2 style="margin-top:14px">Cartas que más lastran</h2>
-      <table><thead><tr><th>Carta</th><th class="n">En mazos</th><th class="n">Ajustada</th></tr></thead><tbody>${cards(r.worst, 'neg-t')}</tbody></table>
-    </div>`;
+  const q = n => encodeURIComponent(n);
+  const [ra, rb, ma, mb] = await Promise.all([
+    api('/api/commander?name=' + q(a)), api('/api/commander?name=' + q(b)),
+    api('/api/matchups?name=' + q(a)).catch(() => ({ rows: [] })), api('/api/matchups?name=' + q(b)).catch(() => ({ rows: [] }))]);
+  const hA = ma.rows.find(x => x.opponent === b), hB = mb.rows.find(x => x.opponent === a);
+  const la = cmdLabel(a), lb = cmdLabel(b);
+
+  // Resultados: ¿se distingue la diferencia de winrate del azar?
+  const diff = ra.winRate - rb.winRate, z = zTwo(ra.wins, ra.games, rb.wins, rb.games);
+  const verdict = Math.abs(z) < 2 ? 'no se distingue del azar con estos datos'
+    : diff > 0 ? esc(la) + ' rinde mejor de forma clara' : esc(lb) + ' rinde mejor de forma clara';
+  const row = (label, x, y, fmt = v => v) => '<tr><td>' + label + '</td><td class="n">' + fmt(x) + '</td><td class="n">' + fmt(y) + '</td></tr>';
+
+  // Cartas que los distinguen: las que uno juega mucho y el otro casi nunca (sin tierras básicas)
+  const inc = r => new Map(r.popular.filter(c => !BASIC_LAND.test(c.card)).map(c => [c.card, c.inclusion]));
+  const ia = inc(ra), ib = inc(rb);
+  const only = (x, y) => [...x].map(([card, v]) => ({ card, v, w: y.get(card) || 0 })).filter(c => c.v >= 0.4 && c.v - c.w >= 0.3)
+    .sort((m, n) => (n.v - n.w) - (m.v - m.w)).slice(0, 10);
+  const both = [...ia].filter(([card, v]) => v >= 0.5 && (ib.get(card) || 0) >= 0.5).length;
+  const union = new Set([...ia].filter(([, v]) => v >= 0.5).map(([c]) => c).concat([...ib].filter(([, v]) => v >= 0.5).map(([c]) => c))).size;
+  const list = (rows, who) => rows.length
+    ? '<table><thead><tr><th>Carta</th><th class="n">' + esc(who) + '</th><th class="n">El otro</th></tr></thead><tbody>' +
+      rows.map(c => '<tr><td>' + cn(c.card) + '</td><td class="n">' + pct(c.v, 0) + '</td><td class="n muted">' + pct(c.w, 0) + '</td></tr>').join('') + '</tbody></table>'
+    : '<div class="muted">Nada que destaque: comparten casi todo lo que juegan.</div>';
+
+  const h2h = (h, x, y) => h ? '<div><b>' + esc(x) + '</b> gana el <b>' + pct(h.winRate) + '</b> cuando <b>' + esc(y) + '</b> está en su mesa (' + h.pods + ' mesas), frente al ' + pct(h.winRateWithout) + ' sin él: <span class="' + (h.lift >= 0 ? 'pos-t' : 'neg-t') + '">' + pp(h.lift) + '</span>.</div>' : '';
+  const cardsCol = r => {
+    const rows = (l, sign) => l.filter(c => c.q < 0.25).slice(0, 6)
+      .map(c => '<tr><td>' + cn(c.card) + '</td><td class="n">' + pct(c.inclusion, 0) + '</td><td class="n ' + sign + '">' + pp(c.adj) + '</td></tr>').join('') || '<tr><td class="muted">Sin datos fiables</td></tr>';
+    return '<div class="panel"><h2>' + cn(r.commander, cmdLabel(r.commander)) + ': lo que más ayuda y lastra</h2>' +
+      '<table><thead><tr><th>Carta</th><th class="n">En mazos</th><th class="n">Ajustada</th></tr></thead><tbody>' + rows(r.best, 'pos-t') + rows(r.worst, 'neg-t') + '</tbody></table></div>';
   };
-  $('#app').innerHTML = `
-    <button class="back" id="back">← Volver a ${esc(short(a, 40))}</button>
-    <h2 style="font-size:20px">Comparación</h2>
-    <div class="panel">
-      <h2>Cara a cara</h2>
-      ${h2h ? `<div><b>${esc(short(a, 40))}</b> gana el <b>${pct(h2h.winRate)}</b> de las veces cuando <b>${esc(short(b, 40))}</b> está en su mesa (${h2h.pods} mesas), frente al ${pct(h2h.winRateWithout)} sin él: <span class="${h2h.lift >= 0 ? 'pos-t' : 'neg-t'}">${pp(h2h.lift)}</span>.</div>
-      <div class="note">Mide solo mesas donde coinciden los dos. Recuerda el sesgo de composición de mesa (ver «Rendimiento contra el meta»).</div>`
-        : '<div class="muted">No hay mesas suficientes donde coincidan ambos con el periodo y filtro actuales.</div>'}
-    </div>
-    <div class="cols">${col(ra)}${col(rb)}</div>`;
+
+  $('#app').innerHTML = '<button class="back" id="back">← Volver a ' + esc(short(a, 40)) + '</button>' +
+    '<h2 style="font-size:20px">' + cn(a, la) + ' <span class="muted">frente a</span> ' + cn(b, lb) + '</h2>' +
+    '<div class="panel"><h2>Resultados</h2>' +
+    '<table><thead><tr><th></th><th class="n">' + esc(la) + '</th><th class="n">' + esc(lb) + '</th></tr></thead><tbody>' +
+    row('Winrate', ra.winRate, rb.winRate, v => '<b>' + pct(v) + '</b>') +
+    row('Frente a la media del meta', ra.winRate - ra.baseline, rb.winRate - rb.baseline, pp) +
+    row('Mazos', ra.decks, rb.decks) + row('Partidas', ra.games, rb.games) + row('Empates', ra.drawRate, rb.drawRate, v => pct(v)) + '</tbody></table>' +
+    '<div class="cmpverdict">Diferencia de winrate: <b class="' + (Math.abs(z) >= 2 ? (diff > 0 ? 'pos-t' : 'neg-t') : 'muted') + '">' + pp(diff) + '</b> · ' + verdict + '.</div></div>' +
+    '<div class="panel"><h2>Cara a cara</h2>' +
+    (hA || hB ? h2h(hA, la, lb) + h2h(hB, lb, la) +
+      '<div class="note">Mide solo mesas donde coinciden los dos. Recuerda el sesgo de composición de mesa (ver «Rendimiento contra el meta»).</div>'
+      : '<div class="muted">No hay mesas suficientes donde coincidan ambos con el periodo y filtro actuales.</div>') + '</div>' +
+    '<div class="panel"><h2>En qué se parecen las listas</h2><div class="muted" style="margin-bottom:8px">Comparten <b>' + both + '</b> cartas que juegan al menos la mitad de sus mazos (de ' + union + ' en total, sin contar tierras básicas).</div>' +
+    '<div class="cols"><div><h2>Solo (o casi) en ' + esc(la) + '</h2>' + list(only(ia, ib), la) + '</div><div><h2>Solo (o casi) en ' + esc(lb) + '</h2>' + list(only(ib, ia), lb) + '</div></div></div>' +
+    '<div class="cols">' + cardsCol(ra) + cardsCol(rb) + '</div>';
   $('#back').onclick = () => { ui.view = { t: 'cmd', name: a, minWith: 5 }; openCommander(a); };
   window.scrollTo(0, 0);
 }
