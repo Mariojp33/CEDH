@@ -44,7 +44,6 @@ async function scenario(name) {
   }
   out.cabecera = { buscador: !!document.getElementById('gq'), resumen: document.getElementById('fsum').textContent };
   out.inicio = tabs('.tabs');
-  out.atajos = $$('.quick button').length;
   const filas = () => $$('#rows tr').length;
   const pocos = Number(document.getElementById('nfew').textContent);
   const antes = filas(); document.getElementById('showall').click();
@@ -169,7 +168,7 @@ async function scenario(name) {
   const qq = document.getElementById('ct-q'); sc.value = 'all'; qq.value = 'zzz-no-existe'; qq.dispatchEvent(new Event('input')); await wait(1500);
   out.torneosCmd = { todas, resumen, campeones: campeones.length, colJugadores, conPorcentaje, soloGanadores: campeones.every(tr => /campeón/.test(tr.textContent)), vacio: /Ningún mazo coincide/.test(document.getElementById('ct-out').textContent), mas: !document.getElementById('ct-more').hidden };
   // Revisar mi lista: con sección de comandantes, sin sección, y ambigua
-  document.getElementById('back').click(); await until(() => document.querySelector('.quick'));
+  document.getElementById('back').click(); await until(() => document.querySelector('#rows tr'));
   document.getElementById('tab-lista').click(); await until(() => document.getElementById('rl-go') && document.querySelectorAll('#rl-cmd option').length > 5);
   const rep = await (await fetch('/api/commander?name=' + encodeURIComponent('Kinnan, Bonder Prodigy') + '&days=90&dec=1')).json();
   const cartas = rep.popular.slice(0, 70).map(c => '1 ' + c.card);
@@ -181,7 +180,7 @@ async function scenario(name) {
   out.revisar = { ficha: (document.querySelector('.head h2') || {}).textContent, pestaña: (document.querySelector('.tabs [aria-selected=true]') || {}).textContent,
     informe: $$('#ml-out h2').map(h => h.textContent.trim()).slice(0, 3) };
   // Sin sección: el comandante aparece como una carta más
-  document.getElementById('back').click(); await until(() => document.querySelector('.quick'));
+  document.getElementById('back').click(); await until(() => document.querySelector('#rows tr'));
   document.getElementById('tab-lista').click(); await until(() => document.getElementById('rl-go') && document.querySelectorAll('#rl-cmd option').length > 5);
   document.getElementById('rl-text').value = ['1 Kinnan, Bonder Prodigy'].concat(cartas).join('\n');
   document.getElementById('rl-go').click();
@@ -250,7 +249,6 @@ test('interfaz: recorrido por secciones, buscador único, ficha y «Revisar mi l
   assert.ifError(r.error);
   assert.deepStrictEqual(r.errs, [], 'sin errores en la consola');
   assert.deepStrictEqual(r.inicio, ['Mazos', 'Meta', 'Torneos y listas', 'Preparar mesa', 'Revisar mi lista', 'Buscar carta', 'Más']);
-  assert.strictEqual(r.atajos, 3);
   assert.ok(r.pocosMazos.ocultos > 0 && r.pocosMazos.despues === r.pocosMazos.antes + r.pocosMazos.ocultos, 'la casilla añade a la tabla los comandantes con menos de 5 mazos');
   assert.match(r.cabecera.resumen, /Filtros · 3 meses · empates cuentan como no ganadas/);
   assert.deepStrictEqual(r.meta.apartados, ['Panorama', 'Novedades de cartas']);

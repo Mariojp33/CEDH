@@ -4,16 +4,33 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>cEDH Stats por comandante</title>
+<meta name="description" content="__DESC__">
+<meta name="theme-color" content="#b4532a">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="manifest" href="manifest.webmanifest">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="cEDH Stats">
+<meta property="og:title" content="__TITLE__">
+<meta property="og:description" content="__DESC__">
+<meta property="og:image" content="__IMAGE__">
+<meta property="og:url" content="__URL__">
+<meta name="twitter:card" content="__CARD__">
+<script src="theme.js"></script>
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
 <div class="wrap">
   <header class="top">
-    <h1>cEDH Stats por comandante V2.1</h1>
+    <h1><img class="logo" src="favicon.svg" alt="" width="28" height="28">cEDH Stats <span class="h1sub">por comandante</span> <small class="ver">V2.1</small></h1>
     <div class="gsearch" role="search">
       <label class="sr" for="gq">Buscar un comandante o una carta</label>
       <input type="search" id="gq" placeholder="Buscar un comandante o una carta…" autocomplete="off" aria-controls="gs" aria-expanded="false">
       <div id="gs" class="gsug" role="listbox" aria-label="Resultados de la búsqueda" hidden></div>
+    </div>
+    <div class="hbtns">
+      <button type="button" class="iconbtn" id="shareapp" title="Compartir esta pantalla" aria-label="Compartir esta pantalla">⤴</button>
+      <button type="button" class="iconbtn" id="theme" title="Cambiar entre tema claro y oscuro" aria-label="Cambiar tema">◐</button>
     </div>
   </header>
   <div class="status muted" id="status" role="status" aria-live="polite">Cargando…</div>
@@ -49,6 +66,6 @@
   </footer>
 </div>
 
-<script src="app.js"></script>
+<script type="module" src="app.js"></script>
 </body>
 </html>
