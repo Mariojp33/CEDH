@@ -112,7 +112,7 @@ Todos aceptan además `dec=1` (empates fuera del cálculo). Las respuestas se co
 - `lib/threats.js` — cartas por función (remates, interacción, tutores, maná, odio) y lo que define a un mazo.
 - `lib/combos.js` — combos y amenazas (Commander Spellbook + nuestros mazos).
 - `lib/table.js` — preparar mesa (matchups contra rivales concretos y cartas que los distinguen).
-- `lib/rating.js` — modelo de Luce (fuerza por comandante); probado, pero no se usa en la web porque no mejora al winrate directo (ver más abajo).
+- `lib/rating.js` — modelo de Luce (fuerza por comandante); probado, pero no se usa en la web porque no mejora al winrate directo (ver más abajo). 
 - `server.js` — estado, carga del seed y actualizaciones, arranque.
 - `lib/routes.js` — rutas de la API (una función por endpoint, con caché de las respuestas pesadas) y archivos estáticos.
 - `lib/http.js` — respuestas JSON con gzip, estáticos y cabeceras de seguridad.
